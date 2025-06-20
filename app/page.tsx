@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { Button } from "./components/DemoComponents";
 import Image from "next/image";
-import { NFTStorage, File as NFTFile } from "nft.storage";
+
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -79,8 +79,12 @@ export default function CoinItPage() {
       } else {
         setError(data.error || "Failed to generate image");
       }
-    } catch (err: any) {
-      setError(err.message || "Unknown error");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Unknown error");
+      }
     } finally {
       setLoading(false);
     }
@@ -167,17 +171,25 @@ export default function CoinItPage() {
             setStatus("error");
             setModalMsg(coinData.message || coinData.error || "Failed to create coin");
           }
-        } catch (coinErr: any) {
+        } catch (coinErr: unknown) {
           setStatus("error");
-          setModalMsg(coinErr.message || "Unknown error during coin creation");
+          if (coinErr instanceof Error) {
+            setModalMsg(coinErr.message);
+          } else {
+            setModalMsg("Unknown error during coin creation");
+          }
         }
       } else {
         setStatus("error");
         setModalMsg(data.error || "Failed to upload to IPFS");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setStatus("error");
-      setModalMsg(err.message || "Failed to upload to IPFS");
+      if (err instanceof Error) {
+        setModalMsg(err.message);
+      } else {
+        setModalMsg("Failed to upload to IPFS");
+      }
     }
   }
 

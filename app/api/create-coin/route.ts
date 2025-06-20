@@ -59,8 +59,10 @@ export async function POST(req: NextRequest) {
       address: result.address,
       zoraUrl,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Create Coin error:', err);
-    return NextResponse.json({ error: err.message || "Failed to create coin" }, { status: 500 });
+    let message = 'Failed to create coin';
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 } 

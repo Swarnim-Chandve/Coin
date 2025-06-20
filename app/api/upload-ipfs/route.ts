@@ -55,8 +55,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to upload metadata to Pinata" }, { status: 500 });
     }
     return NextResponse.json({ cid: `ipfs://${metaData.IpfsHash}` });
-  } catch (err: any) {
-    console.error('Pinata upload error:', err);
-    return NextResponse.json({ error: err.message || "Failed to upload to Pinata" }, { status: 500 });
+  } catch (err: unknown) {
+    let message = 'Failed to upload to IPFS';
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 } 

@@ -26,8 +26,9 @@ export async function POST(req: NextRequest) {
     } else {
       return NextResponse.json({ error: "No image generated" }, { status: 500 });
     }
-  } catch (error: any) {
-    console.error(error);
-    return NextResponse.json({ error: error.message || "Unknown error" }, { status: 500 });
+  } catch (err: unknown) {
+    let message = 'Failed to generate image';
+    if (err instanceof Error) message = err.message;
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 } 
