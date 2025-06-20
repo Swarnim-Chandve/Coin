@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     console.log('Coin created successfully:', result);
 
     // Build Zora coin URL
-    const zoraUrl = `https://zora.co/collect/base-sepolia/${result.address}`;
+    const zoraUrl = `https://testnet.zora.co/coin/bsep:${result.address}`;
 
     return NextResponse.json({
       success: true,

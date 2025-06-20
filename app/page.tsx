@@ -154,7 +154,12 @@ export default function CoinItPage() {
           });
           const coinData = await coinRes.json();
           console.log('Create Coin response:', coinData);
-          alert(`Create Coin: ${coinData.success ? 'Success' : 'Error'}\n${coinData.message || coinData.error}`);
+          if (coinData.success && coinData.address) {
+            const zoraUrl = `https://testnet.zora.co/coin/bsep:${coinData.address}`;
+            alert(`Coin created successfully!\nView on Zora: ${zoraUrl}`);
+          } else {
+            alert(`Create Coin: ${coinData.success ? 'Success' : 'Error'}\n${coinData.message || coinData.error}`);
+          }
         } catch (coinErr: any) {
           console.error('Create Coin error:', coinErr);
           alert('Create Coin error: ' + (coinErr.message || 'Unknown error'));
