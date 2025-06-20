@@ -28,7 +28,6 @@ export default function CoinItPage() {
     description: "",
     symbol: "",
     image: "",
-    properties: [{ key: "", value: "" }],
     metadata: [{ key: "", value: "" }],
   });
   const [status, setStatus] = useState<
@@ -91,13 +90,13 @@ export default function CoinItPage() {
   }
 
   // Handle form field changes
-  function handleFormChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: string, idx?: number, isMeta?: boolean) {
-    if (field === "properties" || field === "metadata") {
-      const arr = isMeta ? [...formData.metadata] : [...formData.properties];
+  function handleFormChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>, field: string, idx?: number) {
+    if (field === "metadata") {
+      const arr = [...formData.metadata];
       if (idx !== undefined) {
         if (e.target.name === "key" || e.target.name === "value") {
           arr[idx][e.target.name as "key" | "value"] = e.target.value;
-          setFormData((prev) => ({ ...prev, [field]: arr }));
+          setFormData((prev) => ({ ...prev, metadata: arr }));
         }
       }
     } else {
@@ -106,11 +105,11 @@ export default function CoinItPage() {
   }
 
   // Add/remove property/metadata fields
-  function addKeyValue(field: "properties" | "metadata") {
-    setFormData((prev) => ({ ...prev, [field]: [...prev[field], { key: "", value: "" }] }));
+  function addKeyValue() {
+    setFormData((prev) => ({ ...prev, metadata: [...prev.metadata, { key: "", value: "" }] }));
   }
-  function removeKeyValue(field: "properties" | "metadata", idx: number) {
-    setFormData((prev) => ({ ...prev, [field]: prev[field].filter((_, i) => i !== idx) }));
+  function removeKeyValue(idx: number) {
+    setFormData((prev) => ({ ...prev, metadata: prev.metadata.filter((_, i) => i !== idx) }));
   }
 
   // Handle image upload
@@ -132,14 +131,12 @@ export default function CoinItPage() {
     setModalMsg("Uploading metadata to IPFS...");
     try {
       // Prepare data for API
-      const propertiesObj = Object.fromEntries(formData.properties.filter(p => p.key).map(p => [p.key, p.value]));
       const metadataObj = Object.fromEntries(formData.metadata.filter(m => m.key).map(m => [m.key, m.value]));
       const metadataToSend = {
         name: formData.name,
         description: formData.description,
         symbol: formData.symbol,
         image: formData.image,
-        properties: propertiesObj,
         metadata: metadataObj,
       };
       const res = await fetch("/api/upload-ipfs", {
@@ -350,27 +347,15 @@ export default function CoinItPage() {
                     <input type="file" accept="image/*" onChange={handleImageUpload} className="mt-2" />
                   </div>
                   <div>
-                    <label className="block mb-1 font-medium text-lg">Properties <span className="text-gray-400 text-sm">(e.g. Location, Year, People)</span></label>
-                    {formData.properties.map((p, i) => (
-                      <div key={i} className="flex gap-2 mb-2">
-                        <input type="text" name="key" placeholder="Key" value={p.key} onChange={e => handleFormChange(e, "properties", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
-                        <input type="text" name="value" placeholder="Value" value={p.value} onChange={e => handleFormChange(e, "properties", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
-                        <button type="button" onClick={() => removeKeyValue("properties", i)} className="text-red-500 text-xl">&times;</button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => addKeyValue("properties")}
-                      className="text-sm text-blue-500 mt-1">+ Add Property</button>
-                  </div>
-                  <div>
                     <label className="block mb-1 font-medium text-lg">Metadata <span className="text-gray-400 text-sm">(e.g. Song, Mood, Weather)</span></label>
                     {formData.metadata.map((m, i) => (
                       <div key={i} className="flex gap-2 mb-2">
-                        <input type="text" name="key" placeholder="Key" value={m.key} onChange={e => handleFormChange(e, "metadata", i, true)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
-                        <input type="text" name="value" placeholder="Value" value={m.value} onChange={e => handleFormChange(e, "metadata", i, true)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
-                        <button type="button" onClick={() => removeKeyValue("metadata", i)} className="text-red-500 text-xl">&times;</button>
+                        <input type="text" name="key" placeholder="Key" value={m.key} onChange={e => handleFormChange(e, "metadata", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
+                        <input type="text" name="value" placeholder="Value" value={m.value} onChange={e => handleFormChange(e, "metadata", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
+                        <button type="button" onClick={() => removeKeyValue(i)} className="text-red-500 text-xl">&times;</button>
                       </div>
                     ))}
-                    <button type="button" onClick={() => addKeyValue("metadata")}
+                    <button type="button" onClick={() => addKeyValue()}
                       className="text-sm text-blue-500 mt-1">+ Add Metadata</button>
                   </div>
                   {/* Form summary for user review */}
@@ -380,14 +365,6 @@ export default function CoinItPage() {
                     <div className="mb-1"><span className="font-medium">Symbol:</span> {formData.symbol}</div>
                     <div className="mb-1"><span className="font-medium">Description:</span> {formData.description}</div>
                     {formData.image && <Image src={formData.image} alt="Coin" width={96} height={96} className="rounded mb-2" />}
-                    <div className="mb-1">
-                      <span className="font-medium">Properties:</span>
-                      <ul className="ml-4 list-disc">
-                        {formData.properties.filter(p => p.key).map((p, i) => (
-                          <li key={i}><span className="font-semibold">{p.key}:</span> {p.value}</li>
-                        ))}
-                      </ul>
-                    </div>
                     <div className="mb-1">
                       <span className="font-medium">Metadata:</span>
                       <ul className="ml-4 list-disc">

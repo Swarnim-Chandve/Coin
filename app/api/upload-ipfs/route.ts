@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, description, symbol, image, properties, metadata } = await req.json();
+    const { name, description, symbol, image, metadata } = await req.json();
     if (!name || !description || !symbol || !image) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
@@ -38,7 +38,6 @@ export async function POST(req: NextRequest) {
       description,
       symbol,
       image: `ipfs://${imageCid}`,
-      properties: properties || {},
       metadata: metadata || {},
     };
     // Upload metadata to Pinata
