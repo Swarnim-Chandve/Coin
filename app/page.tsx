@@ -31,6 +31,11 @@ export default function CoinItPage() {
     properties: [{ key: "", value: "" }],
     metadata: [{ key: "", value: "" }],
   });
+  const [status, setStatus] = useState<
+    "idle" | "ipfs" | "minting" | "success" | "error"
+  >("idle");
+  const [zoraUrl, setZoraUrl] = useState<string | null>(null);
+  const [modalMsg, setModalMsg] = useState<string>("");
 
   // Frame ready for MiniKit
   useEffect(() => {
@@ -119,7 +124,8 @@ export default function CoinItPage() {
   async function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setLoading(true);
+    setStatus("ipfs");
+    setModalMsg("Uploading metadata to IPFS...");
     try {
       // Prepare data for API
       const propertiesObj = Object.fromEntries(formData.properties.filter(p => p.key).map(p => [p.key, p.value]));
@@ -138,10 +144,9 @@ export default function CoinItPage() {
         body: JSON.stringify(metadataToSend),
       });
       const data = await res.json();
-      setLoading(false);
       if (data.cid) {
-        console.log('Uploaded to IPFS! CID/URL:', data.cid, 'Metadata:', metadataToSend);
-        alert(`Uploaded to IPFS! CID/URL: ${data.cid}`);
+        setStatus("minting");
+        setModalMsg("Minting your coin on Zora...");
         // Call create coin API
         try {
           const coinRes = await fetch("/api/create-coin", {
@@ -153,23 +158,26 @@ export default function CoinItPage() {
             }),
           });
           const coinData = await coinRes.json();
-          console.log('Create Coin response:', coinData);
           if (coinData.success && coinData.address) {
-            const zoraUrl = `https://testnet.zora.co/coin/bsep:${coinData.address}`;
-            alert(`Coin created successfully!\nView on Zora: ${zoraUrl}`);
+            const url = `https://testnet.zora.co/coin/bsep:${coinData.address}`;
+            setZoraUrl(url);
+            setStatus("success");
+            setModalMsg("Your coin is live! View it on Zora below.");
           } else {
-            alert(`Create Coin: ${coinData.success ? 'Success' : 'Error'}\n${coinData.message || coinData.error}`);
+            setStatus("error");
+            setModalMsg(coinData.message || coinData.error || "Failed to create coin");
           }
         } catch (coinErr: any) {
-          console.error('Create Coin error:', coinErr);
-          alert('Create Coin error: ' + (coinErr.message || 'Unknown error'));
+          setStatus("error");
+          setModalMsg(coinErr.message || "Unknown error during coin creation");
         }
       } else {
-        setError(data.error || "Failed to upload to IPFS");
+        setStatus("error");
+        setModalMsg(data.error || "Failed to upload to IPFS");
       }
     } catch (err: any) {
-      setLoading(false);
-      setError(err.message || "Failed to upload to IPFS");
+      setStatus("error");
+      setModalMsg(err.message || "Failed to upload to IPFS");
     }
   }
 
@@ -203,7 +211,6 @@ export default function CoinItPage() {
           </div>
         </div>
       </header>
-
       {/* Main Card Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-2 sm:px-4 w-full max-w-2xl mx-auto">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl px-4 sm:px-8 py-6 sm:py-8 flex flex-col items-center">
@@ -258,47 +265,104 @@ export default function CoinItPage() {
               </div>
             </div>
           )}
-          {/* Modal Form for Coin Creation */}
-          {showForm && (
+          {/* Status Modal: only show if status !== 'idle' */}
+          {status !== "idle" && (
+            <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40`} onClick={() => {
+              if (status === "success") {
+                setStatus("idle");
+                setShowForm(false);
+                setZoraUrl(null);
+              } else if (status === "error") {
+                setStatus("idle");
+              }
+            }}>
+              <div
+                className={`rounded-2xl shadow-2xl p-8 w-full max-w-md relative animate-fade-in flex flex-col items-center ${status === "success" ? "bg-green-50" : "bg-white"}`}
+                onClick={e => e.stopPropagation()}
+              >
+                {status === "ipfs" && (
+                  <>
+                    <div className="mb-4 text-2xl font-bold text-center">Uploading to IPFS...</div>
+                    <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+                    <div className="text-gray-600 text-center">{modalMsg}</div>
+                  </>
+                )}
+                {status === "minting" && (
+                  <>
+                    <div className="mb-4 text-2xl font-bold text-center">Minting Coin...</div>
+                    <div className="w-12 h-12 border-4 border-green-200 border-t-green-500 rounded-full animate-spin mb-4"></div>
+                    <div className="text-gray-600 text-center">{modalMsg}</div>
+                  </>
+                )}
+                {status === "success" && (
+                  <>
+                    <svg className="w-16 h-16 mb-4" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" fill="#bbf7d0" />
+                      <path d="M8 12l2.5 2.5L16 9" stroke="#22c55e" strokeWidth="2.5" />
+                    </svg>
+                    <div className="mb-4 text-2xl font-bold text-center text-green-700">Coin Created!</div>
+                    <div className="mb-2 text-gray-700 text-center">{modalMsg}</div>
+                    {zoraUrl && (
+                      <a href={zoraUrl} target="_blank" rel="noopener noreferrer" className="block mt-4 px-6 py-3 bg-blue-600 text-white rounded-xl font-bold text-lg shadow hover:bg-blue-700 transition">View on Zora</a>
+                    )}
+                    <button className="mt-6 text-blue-500 underline" onClick={() => { setStatus("idle"); setShowForm(false); setZoraUrl(null); }}>Close</button>
+                  </>
+                )}
+                {status === "error" && (
+                  <>
+                    <div className="mb-4 text-2xl font-bold text-center text-red-600">Error</div>
+                    <div className="mb-2 text-gray-700 text-center">{modalMsg}</div>
+                    <button className="mt-6 text-blue-500 underline" onClick={() => setStatus("idle")}>Close</button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          {/* Form Modal: only show if showForm && status === 'idle' */}
+          {showForm && status === "idle" && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-              <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg relative animate-fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl relative animate-fade-in">
                 <button className="absolute top-3 right-3 text-gray-400 hover:text-gray-700 text-2xl" onClick={() => setShowForm(false)}>&times;</button>
-                <h2 className="text-2xl font-bold mb-4 text-gray-900 text-center">Create Coin</h2>
-                <form onSubmit={handleFormSubmit} className="flex flex-col gap-4">
-                  <input type="text" className="input" placeholder="Name" value={formData.name} onChange={e => handleFormChange(e, "name")} required />
-                  <input type="text" className="input" placeholder="Symbol" value={formData.symbol} onChange={e => handleFormChange(e, "symbol")} required />
-                  <textarea className="input" placeholder="Description" value={formData.description} onChange={e => handleFormChange(e, "description")} required />
+                <h2 className="text-3xl font-bold mb-6 text-gray-900 text-center">Create Your Memory Coin</h2>
+                <form onSubmit={handleFormSubmit} className="flex flex-col gap-6">
+                  <div className="flex flex-col md:flex-row gap-6">
+                    <input type="text" className="input flex-1 text-lg px-5 py-4 rounded-xl border border-gray-300 focus:border-blue-400" placeholder="Name (e.g. Summer 2009)" value={formData.name} onChange={e => handleFormChange(e, "name")}
+                      required />
+                    <input type="text" className="input flex-1 text-lg px-5 py-4 rounded-xl border border-gray-300 focus:border-blue-400" placeholder="Symbol (e.g. SUM09)" value={formData.symbol} onChange={e => handleFormChange(e, "symbol")}
+                      required />
+                  </div>
+                  <textarea className="input text-lg px-5 py-4 rounded-xl border border-gray-300 focus:border-blue-400 min-h-[100px]" placeholder="Description (What makes this memory special?)" value={formData.description} onChange={e => handleFormChange(e, "description")} required />
                   <div>
-                    <label className="block mb-1 font-medium">Image</label>
+                    <label className="block mb-1 font-medium text-lg">Image</label>
                     {formData.image && <Image src={formData.image} alt="Coin" width={128} height={128} className="rounded-lg mb-2" />}
-                    <input type="file" accept="image/*" onChange={handleImageUpload} />
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="mt-2" />
                   </div>
                   <div>
-                    <label className="block mb-1 font-medium">Properties</label>
+                    <label className="block mb-1 font-medium text-lg">Properties <span className="text-gray-400 text-sm">(e.g. Location, Year, People)</span></label>
                     {formData.properties.map((p, i) => (
-                      <div key={i} className="flex gap-2 mb-1">
-                        <input type="text" name="key" placeholder="Key" value={p.key} onChange={e => handleFormChange(e, "properties", i)} className="input flex-1" />
-                        <input type="text" name="value" placeholder="Value" value={p.value} onChange={e => handleFormChange(e, "properties", i)} className="input flex-1" />
-                        <button type="button" onClick={() => removeKeyValue("properties", i)} className="text-red-500">&times;</button>
+                      <div key={i} className="flex gap-2 mb-2">
+                        <input type="text" name="key" placeholder="Key" value={p.key} onChange={e => handleFormChange(e, "properties", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
+                        <input type="text" name="value" placeholder="Value" value={p.value} onChange={e => handleFormChange(e, "properties", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
+                        <button type="button" onClick={() => removeKeyValue("properties", i)} className="text-red-500 text-xl">&times;</button>
                       </div>
                     ))}
                     <button type="button" onClick={() => addKeyValue("properties")}
-                      className="text-xs text-[var(--app-accent)] mt-1">+ Add Property</button>
+                      className="text-sm text-blue-500 mt-1">+ Add Property</button>
                   </div>
                   <div>
-                    <label className="block mb-1 font-medium">Metadata</label>
+                    <label className="block mb-1 font-medium text-lg">Metadata <span className="text-gray-400 text-sm">(e.g. Song, Mood, Weather)</span></label>
                     {formData.metadata.map((m, i) => (
-                      <div key={i} className="flex gap-2 mb-1">
-                        <input type="text" name="key" placeholder="Key" value={m.key} onChange={e => handleFormChange(e, "metadata", i, true)} className="input flex-1" />
-                        <input type="text" name="value" placeholder="Value" value={m.value} onChange={e => handleFormChange(e, "metadata", i, true)} className="input flex-1" />
-                        <button type="button" onClick={() => removeKeyValue("metadata", i)} className="text-red-500">&times;</button>
+                      <div key={i} className="flex gap-2 mb-2">
+                        <input type="text" name="key" placeholder="Key" value={m.key} onChange={e => handleFormChange(e, "metadata", i, true)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
+                        <input type="text" name="value" placeholder="Value" value={m.value} onChange={e => handleFormChange(e, "metadata", i, true)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
+                        <button type="button" onClick={() => removeKeyValue("metadata", i)} className="text-red-500 text-xl">&times;</button>
                       </div>
                     ))}
                     <button type="button" onClick={() => addKeyValue("metadata")}
-                      className="text-xs text-[var(--app-accent)] mt-1">+ Add Metadata</button>
+                      className="text-sm text-blue-500 mt-1">+ Add Metadata</button>
                   </div>
                   {/* Form summary for user review */}
-                  <div className="mt-4 p-3 bg-gray-50 rounded-xl border border-[var(--app-card-border)]">
+                  <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
                     <h3 className="font-bold text-lg mb-2 text-gray-800">Review Details</h3>
                     <div className="mb-1"><span className="font-medium">Name:</span> {formData.name}</div>
                     <div className="mb-1"><span className="font-medium">Symbol:</span> {formData.symbol}</div>
@@ -321,7 +385,7 @@ export default function CoinItPage() {
                       </ul>
                     </div>
                   </div>
-                  <Button type="submit" variant="primary" size="lg" className="w-full mt-2">Upload to IPFS & Create Coin</Button>
+                  <Button type="submit" variant="primary" size="lg" className="w-full mt-4 py-4 text-lg">Upload to IPFS & Create Coin</Button>
                 </form>
               </div>
             </div>
