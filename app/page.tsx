@@ -1,6 +1,6 @@
 "use client";
 
-import { useMiniKit } from "@coinbase/onchainkit/minikit";
+import { useMiniKit, useOpenUrl } from "@coinbase/onchainkit/minikit";
 import { ConnectWallet } from "@coinbase/onchainkit/wallet";
 import { Name, Avatar } from "@coinbase/onchainkit/identity";
 import { useEffect, useRef, useState } from "react";
@@ -15,13 +15,18 @@ function sleep(ms: number) {
 
 export default function CoinItPage() {
   const { setFrameReady, isFrameReady, context } = useMiniKit();
+  const openUrl = useOpenUrl();
   const { isConnected: isWalletConnected, address } = useAccount();
-  const [prompt, setPrompt] = useState("");
-  const [submittedPrompt, setSubmittedPrompt] = useState<string | null>(null);
+
+  // Step 1: Memory Capture State
+  const [memoryInput, setMemoryInput] = useState(""); // For URL or text
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<{imageUrl: string; title: string; description: string;} | null>(null);
   const [loading, setLoading] = useState(false);
-  const [image, setImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Step 2: Minting Form State
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -35,6 +40,7 @@ export default function CoinItPage() {
   >("idle");
   const [zoraUrl, setZoraUrl] = useState<string | null>(null);
   const [modalMsg, setModalMsg] = useState<string>("");
+  const [newCoinAddress, setNewCoinAddress] = useState<string | null>(null);
 
   // Frame ready for MiniKit
   useEffect(() => {
@@ -46,46 +52,63 @@ export default function CoinItPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Show form 2 seconds after image is generated
+  // When a preview is generated, set up the minting form
   useEffect(() => {
-    if (image) {
-      setShowForm(false);
-      sleep(2000).then(() => setShowForm(true));
-      setFormData((prev) => ({ ...prev, image }));
+    if (preview) {
+      setFormData((prev) => ({
+        ...prev,
+        image: preview.imageUrl,
+        name: preview.title,
+        description: preview.description,
+      }));
+      // Wait a moment before showing the form to make the transition feel smoother
+      sleep(500).then(() => setShowForm(true));
     } else {
       setShowForm(false);
     }
-  }, [image]);
+  }, [preview]);
 
-  // Handle prompt submit
-  async function handleSubmit(e?: React.FormEvent) {
+  // Handle Memory Submission (Step 1)
+  async function handleMemorySubmit(e?: React.FormEvent) {
     if (e) e.preventDefault();
-    if (prompt.trim() === "") return;
-    setSubmittedPrompt(prompt);
-    setPrompt("");
+    if (memoryInput.trim() === "" && !uploadedFile) return;
+
     setLoading(true);
-    setImage(null);
+    setPreview(null);
     setError(null);
+    
     try {
-      const res = await fetch("/api/generate-image", {
+      // TODO: Handle uploadedFile with multipart/form-data
+      if (uploadedFile) {
+        throw new Error("File uploads are not implemented yet.");
+      }
+
+      const res = await fetch("/api/process-memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ memoryInput }),
       });
+
       const data = await res.json();
-      if (data.image) {
-        setImage(`data:image/png;base64,${data.image}`);
+
+      if (res.ok) {
+        setPreview(data);
       } else {
-        setError(data.error || "Failed to generate image");
+        setError(data.error || "Failed to process memory.");
       }
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError("Unknown error");
-      }
+      const message = err instanceof Error ? err.message : "An unknown error occurred.";
+      setError(message);
     } finally {
       setLoading(false);
+    }
+  }
+  
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      setUploadedFile(file);
+      setMemoryInput(''); // Clear text input if file is selected
     }
   }
 
@@ -128,22 +151,41 @@ export default function CoinItPage() {
     e.preventDefault();
     setError(null);
     setStatus("ipfs");
-    setModalMsg("Uploading metadata to IPFS...");
+    setModalMsg("Downloading image for upload...");
+
     try {
-      // Prepare data for API
+      // Step 1: Fetch the image from the external URL and convert to Base64
+      const imageResponse = await fetch(formData.image);
+      if (!imageResponse.ok) {
+        throw new Error("Failed to download the image from the source URL.");
+      }
+      const imageBlob = await imageResponse.blob();
+      const base64Image = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(imageBlob);
+      });
+
+      setModalMsg("Uploading metadata to IPFS...");
+
+      // Step 2: Prepare data for the API with the Base64 image
       const metadataObj = Object.fromEntries(formData.metadata.filter(m => m.key).map(m => [m.key, m.value]));
       const metadataToSend = {
         name: formData.name,
         description: formData.description,
         symbol: formData.symbol,
-        image: formData.image,
+        image: base64Image, // Use the converted image data
         metadata: metadataObj,
       };
+
+      // Step 3: Call the IPFS upload API
       const res = await fetch("/api/upload-ipfs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(metadataToSend),
       });
+
       const data = await res.json();
       if (data.cid) {
         setStatus("minting");
@@ -162,6 +204,7 @@ export default function CoinItPage() {
           if (coinData.success && coinData.address) {
             const url = `https://testnet.zora.co/coin/bsep:${coinData.address}`;
             setZoraUrl(url);
+            setNewCoinAddress(coinData.address);
             setStatus("success");
             setModalMsg("Your coin is live! View it on Zora below.");
           } else {
@@ -223,48 +266,71 @@ export default function CoinItPage() {
       {/* Main Card Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-2 sm:px-4 w-full max-w-2xl mx-auto">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl px-4 sm:px-8 py-6 sm:py-8 flex flex-col items-center">
-          <form
-            onSubmit={handleSubmit}
-            className="w-full flex flex-col items-center gap-4 sm:gap-6"
-          >
-            <input
-              ref={inputRef}
-              type="text"
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              placeholder="Type your prompt..."
-              className="w-full px-4 py-3 sm:px-5 sm:py-4 rounded-xl border border-[var(--app-card-border)] bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)] text-lg sm:text-xl shadow-sm"
-              autoFocus
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              className="w-full text-lg sm:text-xl py-3 sm:py-4 bg-[var(--app-accent)] text-white rounded-xl shadow-lg hover:bg-[var(--app-accent-hover)] focus:ring-4 focus:ring-[var(--app-accent-light)]"
-              disabled={prompt.trim() === ""}
+          
+          {/* Hide the initial form if a preview is ready */}
+          {!preview && !loading && (
+            <form
+              onSubmit={handleMemorySubmit}
+              className="w-full flex flex-col items-center gap-4 sm:gap-6 animate-fade-in"
             >
-              Submit
-            </Button>
-          </form>
-          {submittedPrompt && (
-            <div className="mt-4 sm:mt-6 text-gray-500 text-center text-base sm:text-lg animate-fade-in">
-              <span>Last prompt: </span>
-              <span className="font-mono">{submittedPrompt}</span>
-            </div>
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-800 text-center">What memory do you want to mint?</h2>
+            
+              <textarea
+                ref={inputRef}
+                value={memoryInput}
+                onChange={e => {
+                  setMemoryInput(e.target.value);
+                  if (uploadedFile) setUploadedFile(null); // Clear file if user types
+                }}
+                placeholder="Paste a URL or type a memory..."
+                className="w-full px-4 py-3 sm:px-5 sm:py-4 rounded-xl border border-[var(--app-card-border)] bg-gray-50 text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)] text-lg sm:text-xl shadow-sm min-h-[100px]"
+                autoFocus
+                disabled={loading}
+              />
+
+              <div className="w-full flex items-center justify-center">
+                <span className="flex-grow border-t border-gray-200"></span>
+                <span className="px-4 text-gray-500 font-medium">OR</span>
+                <span className="flex-grow border-t border-gray-200"></span>
+              </div>
+
+              <label htmlFor="file-upload" className={`w-full cursor-pointer bg-white border-2 border-dashed border-gray-300 rounded-xl text-center py-6 px-4 hover:border-[var(--app-accent)] hover:text-[var(--app-accent)] transition-colors ${loading ? 'opacity-50' : ''}`}>
+                <input id="file-upload" name="file-upload" type="file" className="sr-only" onChange={handleFileChange} disabled={loading} />
+                {uploadedFile ? (
+                  <span className="font-semibold text-green-600">Selected: {uploadedFile.name}</span>
+                ) : (
+                  <span className="font-medium text-gray-600">Upload a file (image, screenshot...)</span>
+                )}
+              </label>
+
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                className="w-full text-lg sm:text-xl py-3 sm:py-4 bg-[var(--app-accent)] text-white rounded-xl shadow-lg hover:bg-[var(--app-accent-hover)] focus:ring-4 focus:ring-[var(--app-accent-light)]"
+                disabled={ (memoryInput.trim() === "" && !uploadedFile) || loading }
+              >
+                Preview Memory
+              </Button>
+            </form>
           )}
+
           {loading && (
-            <div className="mt-4 sm:mt-6 text-lg text-[var(--app-accent)] animate-pulse">Generating image...</div>
+            <div className="mt-4 sm:mt-6 text-lg text-[var(--app-accent)] animate-pulse flex flex-col items-center">
+              <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+              Processing memory...
+            </div>
           )}
           {error && (
             <div className="mt-4 sm:mt-6 text-lg text-red-500">{error}</div>
           )}
-          {image && !loading && (
-            <div className="mt-6 sm:mt-8 flex flex-col items-center w-full">
-              <span className="text-xl sm:text-3xl font-extrabold text-gray-900 mb-4 sm:mb-6 text-center">Generated Image</span>
-              <div className="w-full flex justify-center">
+          {preview && !loading && (
+            <div className="mt-6 sm:mt-8 flex flex-col items-center w-full animate-fade-in">
+              <span className="text-xl sm:text-3xl font-extrabold text-gray-900 mb-4 sm:mb-6 text-center">Memory Preview</span>
+              <div className="w-full flex justify-center mb-4">
                 <Image
-                  src={image}
-                  alt={submittedPrompt || "Generated image"}
+                  src={preview.imageUrl}
+                  alt={preview.title || "Memory preview"}
                   width={384}
                   height={384}
                   className="rounded-xl shadow-lg border border-[var(--app-card-border)] max-w-full h-auto object-contain max-h-[50vh]"
@@ -272,6 +338,20 @@ export default function CoinItPage() {
                   priority
                 />
               </div>
+              <Button
+                onClick={() => setShowForm(true)}
+                variant="primary"
+                size="lg"
+                className="w-full mt-4 py-4 text-lg"
+              >
+                Looks good, continue →
+              </Button>
+              <button
+                onClick={() => setPreview(null)}
+                className="mt-4 text-gray-500 hover:text-gray-700"
+              >
+                ← Start over
+              </button>
             </div>
           )}
           {/* Status Modal: only show if status !== 'idle' */}
@@ -281,6 +361,7 @@ export default function CoinItPage() {
                 setStatus("idle");
                 setShowForm(false);
                 setZoraUrl(null);
+                setNewCoinAddress(null);
               } else if (status === "error") {
                 setStatus("idle");
               }
@@ -314,7 +395,21 @@ export default function CoinItPage() {
                     {zoraUrl && (
                       <a href={zoraUrl} target="_blank" rel="noopener noreferrer" className="block mt-4 px-6 py-3 bg-blue-600 text-white rounded-xl font-bold text-lg shadow hover:bg-blue-700 transition">View on Zora</a>
                     )}
-                    <button className="mt-6 text-blue-500 underline" onClick={() => { setStatus("idle"); setShowForm(false); setZoraUrl(null); }}>Close</button>
+                    {newCoinAddress && (
+                      <button
+                        onClick={() => {
+                          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+                          const frameUrl = `${appUrl}/frame/${newCoinAddress}`;
+                          const text = `I just minted a memory on Rewind: "${formData.name}"`;
+                          const shareUrl = `https://warpcast.com/~/compose?text=${encodeURIComponent(text)}&embeds[]=${encodeURIComponent(frameUrl)}`;
+                          openUrl(shareUrl);
+                        }}
+                        className="block mt-2 px-6 py-3 bg-purple-600 text-white rounded-xl font-bold text-lg shadow hover:bg-purple-700 transition"
+                      >
+                        Share on Farcaster
+                      </button>
+                    )}
+                    <button className="mt-6 text-blue-500 underline" onClick={() => { setStatus("idle"); setShowForm(false); setZoraUrl(null); setNewCoinAddress(null); }}>Close</button>
                   </>
                 )}
                 {status === "error" && (
@@ -329,52 +424,45 @@ export default function CoinItPage() {
           )}
           {/* Form Modal: only show if showForm && status === 'idle' */}
           {showForm && status === "idle" && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-              <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl relative animate-fade-in">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg relative animate-fade-in max-h-[90vh] overflow-y-auto">
                 <button className="absolute top-3 right-3 text-gray-400 hover:text-gray-700 text-2xl" onClick={() => setShowForm(false)}>&times;</button>
-                <h2 className="text-3xl font-bold mb-6 text-gray-900 text-center">Create Your Memory Coin</h2>
-                <form onSubmit={handleFormSubmit} className="flex flex-col gap-6">
-                  <div className="flex flex-col md:flex-row gap-6">
-                    <input type="text" className="input flex-1 text-lg px-5 py-4 rounded-xl border border-gray-300 focus:border-blue-400" placeholder="Name (e.g. Summer 2009)" value={formData.name} onChange={e => handleFormChange(e, "name")}
+                <h2 className="text-2xl font-bold mb-4 text-gray-900 text-center">Create Your Memory Coin</h2>
+                <form onSubmit={handleFormSubmit} className="flex flex-col gap-4">
+                  {/* Name and Symbol */}
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <input type="text" className="input flex-1 text-base px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400" placeholder="Name (e.g. Summer 2009)" value={formData.name} onChange={e => handleFormChange(e, "name")}
                       required />
-                    <input type="text" className="input flex-1 text-lg px-5 py-4 rounded-xl border border-gray-300 focus:border-blue-400" placeholder="Symbol (e.g. SUM09)" value={formData.symbol} onChange={e => handleFormChange(e, "symbol")}
+                    <input type="text" className="input flex-1 text-base px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400" placeholder="Symbol (e.g. SUM09)" value={formData.symbol} onChange={e => handleFormChange(e, "symbol")}
                       required />
                   </div>
-                  <textarea className="input text-lg px-5 py-4 rounded-xl border border-gray-300 focus:border-blue-400 min-h-[100px]" placeholder="Description (What makes this memory special?)" value={formData.description} onChange={e => handleFormChange(e, "description")} required />
-                  <div>
-                    <label className="block mb-1 font-medium text-lg">Image</label>
-                    {formData.image && <Image src={formData.image} alt="Coin" width={128} height={128} className="rounded-lg mb-2" />}
-                    <input type="file" accept="image/*" onChange={handleImageUpload} className="mt-2" />
-                  </div>
-                  <div>
-                    <label className="block mb-1 font-medium text-lg">Metadata <span className="text-gray-400 text-sm">(e.g. Song, Mood, Weather)</span></label>
-                    {formData.metadata.map((m, i) => (
-                      <div key={i} className="flex gap-2 mb-2">
-                        <input type="text" name="key" placeholder="Key" value={m.key} onChange={e => handleFormChange(e, "metadata", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
-                        <input type="text" name="value" placeholder="Value" value={m.value} onChange={e => handleFormChange(e, "metadata", i)} className="input flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 text-base" />
-                        <button type="button" onClick={() => removeKeyValue(i)} className="text-red-500 text-xl">&times;</button>
-                      </div>
-                    ))}
-                    <button type="button" onClick={() => addKeyValue()}
-                      className="text-sm text-blue-500 mt-1">+ Add Metadata</button>
-                  </div>
-                  {/* Form summary for user review */}
-                  <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                    <h3 className="font-bold text-lg mb-2 text-gray-800">Review Details</h3>
-                    <div className="mb-1"><span className="font-medium">Name:</span> {formData.name}</div>
-                    <div className="mb-1"><span className="font-medium">Symbol:</span> {formData.symbol}</div>
-                    <div className="mb-1"><span className="font-medium">Description:</span> {formData.description}</div>
-                    {formData.image && <Image src={formData.image} alt="Coin" width={96} height={96} className="rounded mb-2" />}
-                    <div className="mb-1">
-                      <span className="font-medium">Metadata:</span>
-                      <ul className="ml-4 list-disc">
-                        {formData.metadata.filter(m => m.key).map((m, i) => (
-                          <li key={i}><span className="font-semibold">{m.key}:</span> {m.value}</li>
-                        ))}
-                      </ul>
+                  {/* Description */}
+                  <textarea className="input text-base px-4 py-3 rounded-lg border border-gray-300 focus:border-blue-400 min-h-[80px]" placeholder="Description (What makes this memory special?)" value={formData.description} onChange={e => handleFormChange(e, "description")} required />
+                  
+                  {/* Image and Metadata Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block mb-1 font-medium text-base">Image</label>
+                      {formData.image && <Image src={formData.image} alt="Coin" width={96} height={96} className="rounded-lg mb-2" />}
+                      <input type="file" accept="image/*" onChange={handleImageUpload} className="text-sm" />
+                    </div>
+                    <div>
+                      <label className="block mb-1 font-medium text-base">Metadata <span className="text-gray-400 text-sm">(optional)</span></label>
+                      {formData.metadata.map((m, i) => (
+                        <div key={i} className="flex gap-2 mb-2">
+                          <input type="text" name="key" placeholder="Key" value={m.key} onChange={e => handleFormChange(e, "metadata", i)} className="input flex-1 px-3 py-2 rounded-md border border-gray-300 focus:border-blue-400 text-sm" />
+                          <input type="text" name="value" placeholder="Value" value={m.value} onChange={e => handleFormChange(e, "metadata", i)} className="input flex-1 px-3 py-2 rounded-md border border-gray-300 focus:border-blue-400 text-sm" />
+                          <button type="button" onClick={() => removeKeyValue(i)} className="text-red-500 text-lg">&times;</button>
+                        </div>
+                      ))}
+                      <button type="button" onClick={() => addKeyValue()}
+                        className="text-xs text-blue-500 mt-1">+ Add Metadata</button>
                     </div>
                   </div>
-                  <Button type="submit" variant="primary" size="lg" className="w-full mt-4 py-4 text-lg">Upload to IPFS & Create Coin</Button>
+
+                  {/* Review Section (removed for space, functionality is implicit) */}
+                  
+                  <Button type="submit" variant="primary" size="lg" className="w-full mt-2 py-3 text-base">Upload to IPFS & Create Coin</Button>
                 </form>
               </div>
             </div>
