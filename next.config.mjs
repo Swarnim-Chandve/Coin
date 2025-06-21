@@ -20,23 +20,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  async headers() {
-    return [
-      {
-        source: '/(.*)',
-        headers: [
-          {
-            key: 'X-Frame-Options',
-            value: 'ALLOWALL',
-          },
-          {
-            key: 'Content-Security-Policy',
-            value: "frame-ancestors 'self' https://warpcast.com",
-          },
-        ],
-      },
-    ];
-  },
 
   // From original .mjs and for re2.node fix
   webpack: (config, { isServer }) => {
