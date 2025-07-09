@@ -1,0 +1,2130 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Creating Coins
+
+The Coins SDK provides a set of functions to create new coins on the Zora protocol. This page details the process of creating a new coin, the parameters involved, and code examples to help you get started.
+
+## Overview
+
+Creating a coin involves deploying a new ERC20 contract with the necessary Zora protocol integrations. The `createCoin` function handles this process and provides access to the deployed contract.
+
+## Parameters
+
+To create a new coin, you'll need to provide the following parameters:
+
+```ts twoslash
+import { Address } from "viem";
+import { DeployCurrency } from "@zoralabs/coins-sdk";
+
+type CreateCoinArgs = {
+  name: string;             // The name of the coin (e.g., "My Awesome Coin")
+  symbol: string;           // The trading symbol for the coin (e.g., "MAC")
+  uri: string;              // Metadata URI (an IPFS URI is recommended)
+  chainId?: number;         // The chain ID (defaults to base mainnet)
+  owners?: Address[];       // Optional array of owner addresses, defaults to [payoutRecipient]
+  payoutRecipient: Address; // Address that receives creator earnings
+  platformReferrer?: Address; // Optional platform referrer address, earns referral fees
+  // DeployCurrency.ETH or DeployCurrency.ZORA
+  currency?: DeployCurrency; // Optional currency for trading (ETH or ZORA)
+}
+```
+
+### Metadata
+
+The `uri` parameter structure is described in the [Metadata](mdc:coins/contracts/metadata) section.
+
+### Currency
+
+The `currency` parameter determines which token will be used for the trading pair.
+
+```ts
+enum DeployCurrency {
+  ZORA = 1,
+  ETH = 2,
+}
+```
+
+By default:
+- On Base mainnet, ZORA is used as the default currency
+- On other chains, ETH is used as the default currency
+
+Note that ZORA is not supported on Base Sepolia.
+
+### Chain ID
+
+The `chainId` parameter defaults to Base mainnet. Make sure it matches the chain you're deploying to.
+
+### More Information
+
+Further contract details can be found in the [Factory Contract](mdc:coins/contracts/factory) section and the [Coin Contract](mdc:coins/contracts/coin) section.
+
+
+## Usage
+
+### Basic Creation
+
+```ts twoslash
+import { createCoin, DeployCurrency } from "@zoralabs/coins-sdk";
+import { Hex, createWalletClient, createPublicClient, http, Address } from "viem";
+import { base } from "viem/chains";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const walletClient = createWalletClient({
+  account: "0x<YOUR_ACCOUNT>" as Hex,
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+// Define coin parameters
+const coinParams = {
+  name: "My Awesome Coin",
+  symbol: "MAC",
+  uri: "ipfs://bafybeigoxzqzbnxsn35vq7lls3ljxdcwjafxvbvkivprsodzrptpiguysy",
+  payoutRecipient: "0xYourAddress" as Address,
+  platformReferrer: "0xOptionalPlatformReferrerAddress" as Address, // Optional
+  chainId: base.id, // Optional: defaults to base.id
+  currency: DeployCurrency.ZORA, // Optional: ZORA or ETH
+};
+
+// Create the coin
+async function createMyCoin() {
+  try {
+    const result = await createCoin(coinParams, walletClient, publicClient, {
+      gasMultiplier: 120, // Optional: Add 20% buffer to gas (defaults to 100%)
+      // account: customAccount, // Optional: Override the wallet client account
+    });
+    
+    console.log("Transaction hash:", result.hash);
+    console.log("Coin address:", result.address);
+    console.log("Deployment details:", result.deployment);
+    
+    return result;
+  } catch (error) {
+    console.error("Error creating coin:", error);
+    throw error;
+  }
+}
+```
+
+### Using with WAGMI
+
+If you're using WAGMI in your frontend application, you can use the lower-level `createCoinCall` function:
+
+```typescript
+import * as React from "react";
+import { createCoinCall, DeployCurrency } from "@zoralabs/coins-sdk";
+import { Address } from "viem";
+import { useWriteContract, useSimulateContract } from "wagmi";
+
+// Define coin parameters
+const coinParams = {
+  name: "My Awesome Coin",
+  symbol: "MAC",
+  uri: "ipfs://bafybeigoxzqzbnxsn35vq7lls3ljxdcwjafxvbvkivprsodzrptpiguysy",
+  payoutRecipient: "0xYourAddress" as Address,
+  platformReferrer: "0xOptionalPlatformReferrerAddress" as Address,
+  // chainId: base.id, // Optional: defaults to base.id
+  // currency: DeployCurrency.ZORA, // Optional: ZORA or ETH
+};
+
+// Create configuration for wagmi
+const contractCallParams = await createCoinCall(coinParams);
+
+// In your component
+function CreateCoinComponent() {
+  const { data: writeConfig } = useSimulateContract({
+    ...contractCallParams,
+  });
+  
+  const { writeContract, status } = useWriteContract(writeConfig);
+  
+  return (
+    <button disabled={!writeContract || status !== 'pending'} onClick={() => writeContract?.()}>
+      {status === 'pending' ? 'Creating...' : 'Create Coin'}
+    </button>
+  );
+}
+```
+
+## Metadata Validation
+
+The SDK validates the metadata URI content before creating the coin. The `uri` parameter is expected to be a `ValidMetadataURI` type, which means it should point to valid metadata following the structure described in the [Metadata](mdc:coins/contracts/metadata) section.
+
+```typescript
+import { validateMetadataURIContent } from "@zoralabs/coins-sdk";
+
+// This will throw an error if the metadata is not valid
+await validateMetadataURIContent(uri);
+```
+
+## Getting Coin Address from Transaction Receipt
+
+Once the transaction is complete, you can extract the deployed coin address from the transaction receipt logs using the `getCoinCreateFromLogs` function:
+
+```typescript
+import { getCoinCreateFromLogs } from "@zoralabs/coins-sdk";
+
+// Assuming you have a transaction receipt
+const coinDeployment = getCoinCreateFromLogs(receipt);
+console.log("Deployed coin address:", coinDeployment?.coin);
+```# Trading Coins
+
+The Coins SDK provides functionality to buy and sell coins on the Zora protocol. This page details the trading functions, their parameters, and includes code examples to help you integrate trading into your application.
+
+## Overview
+
+Trading coins involves either buying or selling an existing coin through the Zora protocol. The SDK provides two main approaches:
+
+1. **High-level functions**: Complete solutions that handle the entire trading process.
+2. **Low-level functions**: Building blocks for more customized implementations.
+
+## Trading Parameters
+
+When trading coins, you'll work with the following parameter structure:
+
+```ts twoslash
+import { Address } from "viem";
+
+type TradeParams = {
+  direction: "sell" | "buy";  // The trade direction
+  target: Address;            // The target coin contract address
+  args: {
+    recipient: Address;       // The recipient of the trade output
+    orderSize: bigint;        // The size of the order
+    minAmountOut?: bigint;    // Optional minimum amount to receive
+    sqrtPriceLimitX96?: bigint; // Optional price limit for the trade
+    tradeReferrer?: Address;  // Optional referrer address for the trade
+  };
+};
+```
+
+## Buying Coins
+
+### Basic Buy
+
+```ts twoslash
+import { tradeCoin } from "@zoralabs/coins-sdk";
+import { Address, createWalletClient, createPublicClient, http, parseEther, Hex } from "viem";
+import { base } from "viem/chains";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const walletClient = createWalletClient({
+  account: "0x<YOUR_ACCOUNT>" as Hex,
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+// Define buy parameters
+const buyParams = {
+  direction: "buy" as const,
+  target: "0xCoinContractAddress" as Address,
+  args: {
+    recipient: "0xYourAddress" as Address, // Where to receive the purchased coins
+    orderSize: parseEther("0.1"), // Amount of ETH to spend
+    minAmountOut: 0n, // Minimum amount of coins to receive (0 = no minimum)
+    tradeReferrer: "0xOptionalReferrerAddress" as Address, // Optional
+  }
+};
+
+// Execute the buy
+async function buyCoin() {
+  const result = await tradeCoin(buyParams, walletClient, publicClient);
+  
+  console.log("Transaction hash:", result.hash);
+  console.log("Trade details:", result.trade);
+  
+  return result;
+}
+```
+
+### Simulating a Buy
+
+Before executing a buy, you can simulate it to check the expected output:
+
+```ts twoslash
+import { simulateBuy } from "@zoralabs/coins-sdk";
+import { Address, parseEther, createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+async function simulateCoinBuy() {
+  const simulation = await simulateBuy({
+    target: "0xCoinContractAddress" as Address,
+    requestedOrderSize: parseEther("0.1"),
+    publicClient,
+  });
+  
+  console.log("Order size", simulation.orderSize);
+  console.log("Amount out", simulation.amountOut);
+  
+  return simulation;
+}
+```
+
+## Selling Coins
+
+```ts twoslash
+import { tradeCoin } from "@zoralabs/coins-sdk";
+import { Address, parseEther, Hex, createWalletClient, createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const walletClient = createWalletClient({
+  account: "0x<YOUR_ACCOUNT>" as Hex,
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+// Define sell parameters
+const sellParams = {
+  direction: "sell" as const,
+  target: "0xCoinContractAddress" as Address,
+  args: {
+    recipient: "0xYourAddress" as Address, // Where to receive the ETH
+    orderSize: parseEther("100"), // Amount of coins to sell
+    minAmountOut: parseEther("0.05"), // Minimum ETH to receive
+    tradeReferrer: "0xOptionalReferrerAddress" as Address, // Optional
+  }
+};
+
+// Execute the sell
+async function sellCoin() {
+  const result = await tradeCoin(sellParams, walletClient, publicClient);
+  
+  console.log("Transaction hash:", result.hash);
+  console.log("Trade details:", result.trade);
+  
+  return result;
+}
+```
+
+## Using with WAGMI
+
+If you're using WAGMI in your frontend application, you can use the lower-level `tradeCoinCall` function:
+
+```typescript
+import { tradeCoinCall } from "@zoralabs/coins-sdk";
+import { useContractWrite, usePrepareContractWrite } from "wagmi";
+import { Address, parseEther } from "viem";
+
+// Define trade parameters
+const tradeParams = {
+  direction: "buy" as const,
+  target: "0xCoinContractAddress" as Address,
+  args: {
+    recipient: "0xYourAddress" as Address,
+    orderSize: parseEther("0.1"),
+    minAmountOut: 0n,
+    tradeReferrer: "0x0000000000000000000000000000000000000000" as Address,
+  }
+};
+
+// Create configuration for wagmi
+const contractCallParams = tradeCoinCall(tradeParams);
+
+// In your component
+function BuyCoinComponent() {
+  const { config } = usePrepareContractWrite({
+    ...contractCallParams,
+    value: tradeParams.args.orderSize,
+  });
+  
+  const { writeContract, status, write } = useContractWrite(config);
+  
+  return (
+    <button disabled={!writeContract || status === 'pending'} onClick={() => writeContract?.()}>
+      {status === 'pending' ? 'Buying...' : 'Buy Coin'}
+    </button>
+  );
+}
+```
+
+## Reading Trade Events from Transaction Logs
+
+After a trade is completed, you can extract the trade event details from the transaction receipt:
+
+```ts twoslash
+const receipt: any = null;
+
+// ---- cut -----
+import { getTradeFromLogs } from "@zoralabs/coins-sdk";
+
+// Assuming you have a transaction receipt and know the direction
+const tradeEvent = getTradeFromLogs(receipt, "buy"); // or "sell"
+
+if (tradeEvent) {
+  console.log(tradeEvent);
+  ///         ^?
+}
+```
+
+## Best Practices
+
+1. **Referrers**: Creating platforms on top of coins allows you to earn from both platform creation and trading fees on both the create and trade side. Make sure to include your addresses in these fields.
+
+2. **Consider Slippage**: Always set a reasonable `minAmountOut` to protect against slippage in volatile markets.
+
+3. **Simulation First**: If not using the high level API, make sure to simulate and return reasonable errors to the user. This is done for you if using the higher-level `trade` function.
+
+4. **Error Handling**: Implement robust error handling for failed trades.
+
+5. **Gas Estimation**: Be aware that gas costs can vary, especially during network congestion.
+
+6. **Price Limits**: For advanced trading, consider setting `sqrtPriceLimitX96` to control the maximum price impact of your trade. # Updating Coins
+
+The Coins SDK provides functionality to update existing coin properties. This page details how to update a coin's metadata URI and other properties.
+
+## Overview
+
+After creating a coin, you might need to update various properties such as the metadata URI or payout recipient. The SDK provides functions to handle these updates securely.
+
+## Updating Coin URI
+
+The most common update you might want to make is changing a coin's metadata URI.
+
+## Access Control
+
+It's important to note that update functions like `updateCoinURI` and `setPayoutRecipient` can only be called by the coin's owner(s). If the account used to sign the transaction is not an owner, the transaction will revert with an `OnlyOwner` error.
+
+## URI Requirements
+
+The `newURI` parameter must meet these requirements:
+
+1. It is recommended to point to an `ipfs://`, `https://` is also supported but not recommended.
+2. It should point to a valid metadata JSON file.
+
+If these requirements are not met, the update will fail with an error message.
+
+
+### Update Coin URI Parameters
+
+```ts twoslash
+import { Address } from "viem";
+
+type UpdateCoinURIArgs = {
+  coin: Address;    // The coin contract address
+  newURI: string;   // The new URI for the coin metadata (must start with "ipfs://")
+};
+```
+
+### Basic URI Update
+
+```ts twoslash
+import { updateCoinURI } from "@zoralabs/coins-sdk";
+import { createWalletClient, createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+import { Address, Hex } from "viem";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const walletClient = createWalletClient({
+  account: "0x<YOUR_ACCOUNT>" as Hex,
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+// Define update parameters
+const updateParams = {
+  coin: "0xCoinContractAddress" as Address,
+  newURI: "ipfs://bafkreihz5knnvvsvmaxlpw3kout23te6yboquyvvs72wzfulgrkwj7r7dm",
+};
+
+// Execute the update
+async function updateCoinMetadata() {
+  const result = await updateCoinURI(updateParams, walletClient, publicClient);
+  
+  console.log("Transaction hash:", result.hash);
+  console.log("URI updated event:", result.uriUpdated);
+  
+  return result;
+}
+```
+
+### Using with WAGMI
+
+If you're using WAGMI in your frontend application, you can use the lower-level `updateCoinURICall` function:
+
+```typescript
+import { updateCoinURICall } from "@zoralabs/coins-sdk";
+import { useContractWrite, useSimulateContract } from "wagmi";
+
+// Define update parameters
+const updateParams = {
+  coin: "0xCoinContractAddress",
+  newURI: "ipfs://bafkreihz5knnvvsvmaxlpw3kout23te6yboquyvvs72wzfulgrkwj7r7dm",
+};
+
+// Create configuration for wagmi
+const contractCallParams = updateCoinURICall(updateParams);
+
+// In your component
+function UpdateCoinURIComponent() {
+  const { data: config } = useSimulateContract({
+    ...contractCallParams,
+  });
+  
+  const { data, status, writeContract } = useContractWrite(config);
+  
+  return (
+    <button disabled={!writeContract || status !== 'pending'} onClick={() => writeContract?.()}>
+      {status === 'pending' ? 'Updating...' : 'Update Coin URI'}
+    </button>
+  );
+}
+```
+
+## Other Coin Updates
+### Updating Payout Recipient
+
+After coin creation, the payout recipient (who receives creator rewards) can be updated using the SDK's `updatePayoutRecipient` function:
+
+```ts twoslash
+import { updatePayoutRecipient } from "@zoralabs/coins-sdk";
+import { Address, Hex, createWalletClient, createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const walletClient = createWalletClient({
+  account: "0x<YOUR_ACCOUNT>" as Hex, // Must be an owner of the coin
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+// Update the payout recipient
+const result = await updatePayoutRecipient({
+  coin: "0xCoinContractAddress" as Address,
+  newPayoutRecipient: "0xNewPayoutRecipientAddress" as Address,
+}, walletClient, publicClient);
+
+console.log("Transaction hash:", result.hash);
+console.log("Receipt:", result.receipt);
+```
+
+Note: Only owners of the coin can update the payout recipient. If the account used to sign the transaction is not an owner, the transaction will revert with an `OnlyOwner` error.
+# Coin Queries
+
+The Coins SDK provides a comprehensive set of query functions to fetch information about coins, profiles, and related data. This page details the available query functions, their parameters, and usage examples.
+
+## Overview
+
+The query functions are divided into several categories:
+
+1. **[Coin Queries](mdc:coins/sdk/queries/coin)**: Retrieve information on specific coins such as metadata, market data, and comments
+2. **[Profile Queries](mdc:coins/sdk/queries/profile)**: Retrieve information associated with users/wallets like holdings and activity
+3. **[Explore Queries](mdc:coins/sdk/queries/explore)**: Retrieve information about all coins (new, trending, top gainers, etc.)
+4. **[Onchain Queries](mdc:coins/sdk/queries/onchain)**: Fetch data directly from the blockchain (API strongly recommended, only recommended for advanced users)
+
+## API Key Setup
+
+Before using the API queries in a high-usage production environment, you'll need to set up an API key:
+
+```ts twoslash
+import { setApiKey } from "@zoralabs/coins-sdk";
+
+// Set up your API key
+setApiKey("your-api-key-here");
+```
+
+To set up an API key:
+1. Create an account on [Zora](mdc:https:/zora.co)
+2. Navigate to [Zora Developer Settings](mdc:https:/zora.co/settings/developer)
+3. Create an API key
+4. Use the API key in the SDK
+
+
+## Non-Javascript Usage
+
+The Coins SDK API can be used in any language that supports HTTP requests.
+
+Full API documentation can be found [on the SDK site](mdc:https:/api-sdk.zora.engineering/docs) with a dynamic editor and an openapi definition file.
+
+It's strongly recommended to use the authentication header for `api-key` with all requests to this API.
+
+The paths and function names map directly to the SDK functions which can be used to document the usage of these API paths.
+
+
+
+
+# Coin Queries
+
+The Coins SDK provides several query functions to fetch information about specific coins. This page details the available coin query functions, their parameters, and includes usage examples.
+
+## Available Queries
+
+### getCoin
+
+The `getCoin` function retrieves detailed information about a specific coin, including its metadata, market data, and creator information.
+
+#### Parameters
+
+```ts twoslash
+type GetCoinParams = {
+  address: string;   // The coin contract address
+  chain?: number;    // Optional: The chain ID (defaults to Base: 8453)
+};
+```
+
+#### Usage Example
+
+```ts twoslash
+// [!include ~/snippets/coins/queries/getCoin.ts]
+```
+
+#### Response Structure
+
+The response includes a `data` object containing a `zora20Token` object with the following properties:
+
+```ts twoslash
+import { GetCoinResponse } from "@zoralabs/coins-sdk";
+
+// The Zora20Token type is imported from the SDK's generated types.
+// It includes detailed information about a specific coin, such as its metadata, market data, and creator information.
+type Zora20Token = GetCoinResponse['zora20Token'];
+//    ^?
+
+
+
+
+
+//
+
+```
+
+### getCoins
+
+The `getCoins` function retrieves information about multiple coins at once, useful for batch processing or displaying multiple coins.
+
+#### Parameters
+
+```ts twoslash
+type GetCoinsParams = {
+  coins: {
+    collectionAddress: string;
+    chainId: number;
+  }[]
+};
+```
+
+#### Usage Example
+
+```ts twoslash
+// [!include ~/snippets/coins/queries/getCoins.ts]
+```
+
+#### Response Structure
+
+The response includes a `zora20Tokens` array containing objects with the same structure as the `zora20Token` object in the `getCoin` response.
+
+### getCoinComments
+
+The `getCoinComments` function retrieves comments associated with a specific coin, useful for displaying community engagement.
+
+#### Parameters
+
+```ts twoslash
+type GetCoinCommentsParams = {
+  address: string;    // The coin contract address
+  chain?: number;     // Optional: The chain ID (defaults to Base: 8453)
+  after?: string;     // Optional: Pagination cursor for fetching next page
+  count?: number;     // Optional: Number of comments to return per page
+};
+```
+
+#### Usage Example
+
+```ts twoslash
+// [!include ~/snippets/coins/queries/getCoinComments.ts]
+```
+
+#### Paginating Through All Comments
+
+To fetch all comments for a coin, you can use pagination:
+
+```ts twoslash
+// [!include ~/snippets/coins/queries/getCoinCommentsPagination.ts]
+```
+
+#### Response Structure
+
+The response includes a `comments` array and pagination information:
+
+
+## Error Handling
+
+All query functions follow the same error handling pattern. When an error occurs, the promise is rejected with an error object that includes details about what went wrong.
+
+```ts twoslash
+// [!include ~/snippets/coins/queries/queryErrors.ts]
+```# Profile Queries
+
+The Coins SDK provides several query functions to retrieve information about user profiles and their coin holdings. This page details the available profile query functions, their parameters, and includes usage examples.
+
+Queries:
+
+- [`getProfile`](mdc:#getprofile)
+- [`getProfileBalances`](mdc:#getprofilebalances)
+
+## Available Queries
+
+### getProfile
+
+The `getProfile` function retrieves detailed information about a user's profile, including their handle, display name, bio, and profile image.
+
+#### Parameters
+
+```ts twoslash
+type GetProfileParams = {
+  identifier: string;   // The user's wallet address or zora handle
+};
+```
+
+#### Usage Example
+
+```ts twoslash
+// @errors: 2307
+import { getProfile } from "@zoralabs/coins-sdk";
+
+async function fetchUserProfile() {
+  const response = await getProfile({
+    identifier: "0xUserWalletAddress",
+  });
+  
+  // TODO: fix profile graphql types
+  const profile: any = response?.data?.profile;
+  
+  if (profile) {
+    console.log("Profile Details:");
+    console.log("- Handle:", profile.handle);
+    console.log("- Display Name:", profile.displayName);
+    console.log("- Bio:", profile.bio);
+    
+    // Access profile image if available
+    if (profile.avatar?.medium) {
+      console.log("- Profile Image:", profile.avatar.medium);
+    }
+    
+    // Access social links if available
+    if (profile?.linkedWallets && profile?.linkedWallets?.edges?.length || 0 > 0) {
+      console.log("Linked Wallets:");
+      profile?.linkedWallets?.edges?.forEach((link: any) => {
+        console.log(`- ${link?.node?.walletType}: ${link?.node?.walletAddress}`);
+      });
+    }
+  } else {
+    console.log("Profile not found or user has not set up a profile");
+  }
+  
+  return response;
+}
+```
+
+#### Response Structure
+
+The response includes a `profile` object with the following properties:
+
+```ts twoslash
+type ProfileData = {
+  profile?: {
+    address?: string;         // User's wallet address
+    handle?: string;          // Username/handle
+    displayName?: string;     // User's display name
+    bio?: string;             // User's biography/description
+    joinedAt?: string;        // When the user joined
+    profileImage?: {          // Profile image data
+      small?: string;         // Small version of profile image
+      medium?: string;        // Medium version of profile image
+      blurhash?: string;      // Blurhash for image loading
+    };
+    linkedWallets?: Array<{     // Connected social accounts
+      type?: string;
+      url?: string;
+    }>;
+  }
+}
+```
+
+### getProfileBalances
+
+The `getProfileBalances` function retrieves a list of all coin balances held by a specific user, including the coin details and current value.
+
+#### Parameters
+
+```ts twoslash
+type GetProfileBalancesParams = {
+  address: string;    // The user's wallet address
+  after?: string;     // Optional: Pagination cursor for fetching next page
+  count?: number;     // Optional: Number of balances to return per page
+};
+```
+
+#### Usage Example
+
+```ts twoslash
+// @errors: 2307
+import { getProfileBalances } from "@zoralabs/coins-sdk";
+
+async function fetchUserBalances() {
+  const response = await getProfileBalances({
+    identifier: "0xUserWalletAddress", // Can also be zora user profile handle
+    count: 20,        // Optional: number of balances per page
+    after: undefined, // Optional: for pagination
+  });
+
+  const profile: any = response.data?.profile;
+  
+  console.log(`Found ${profile.coinBalances?.length || 0} coin balances`);
+  
+  profile.coinBalances?.forEach((balance: any, index: number) => {
+    console.log(balance)
+  });
+  
+  // For pagination
+  if (profile.coinBalances?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", profile.coinBalances?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+#### Paginating Through All Balances
+
+If a user holds many coins, you might need to paginate through all of their balances:
+
+```ts twoslash
+// @errors: 2307
+import { getProfileBalances } from "@zoralabs/coins-sdk";
+
+async function fetchAllUserBalances(userAddress: string) {
+  let allBalances: any[] = [];
+  let cursor = undefined;
+  const pageSize = 20;
+  
+
+  // Continue fetching until no more pages
+  do {
+    const response = await getProfileBalances({
+      identifier: userAddress, // UserAddress or zora handle
+      count: pageSize,
+      after: cursor,
+    });
+
+    const profile: any = response.data?.profile;
+    
+    // Add balances to our collection
+    if (profile && profile.coinBalances) {
+      allBalances = [...allBalances, ...profile.coinBalances.edges.map((edge: any) => edge.node)];
+    }
+    
+    // Update cursor for next page
+    cursor = profile?.coinBalances?.pageInfo?.endCursor;
+    
+    // Break if no more results
+    if (!cursor || profile?.coinBalances?.edges?.length === 0) {
+      break;
+    }
+    
+  } while (true);
+  
+  console.log(`Fetched ${allBalances.length} total coin balances`);
+  return allBalances;
+}
+```
+
+#### Response Structure
+
+The response includes a `balances` array and pagination information:
+
+```ts twoslash
+type Response = {
+  balances?: Array<{
+    id?: string;              // Unique identifier for this balance
+    token?: {                 // Coin information
+      id?: string;            // Coin ID
+      name?: string;          // Coin name
+      symbol?: string;        // Trading symbol
+      address?: string;       // Coin contract address
+      chainId?: number;       // Chain ID
+      totalSupply?: string;   // Total supply of the coin
+      marketCap?: string;     // Current market capitalization
+      volume24h?: string;     // 24-hour trading volume
+      createdAt?: string;     // Creation timestamp
+      uniqueHolders?: number; // Number of unique holders
+      media?: {               // Media associated with the coin
+        previewImage?: string;
+        medium?: string;
+        blurhash?: string;
+      };
+    };
+    amount?: {                // Balance amount
+      amountRaw?: string;     // Raw amount (in base units)
+      amountDecimal?: number; // Decimal representation
+    };
+    valueUsd?: string;        // Estimated USD value
+    timestamp?: string;       // Last updated timestamp
+  }>;
+  pagination?: {
+    cursor?: string;          // Cursor for the next page
+  };
+}
+```
+# Explore Queries
+
+The Coins SDK provides several explore functions to discover coins based on different criteria such as market performance, volume, and recency. These queries are useful for building discovery interfaces, trending sections, and leaderboards.
+
+### Queries:
+
+- [`getCoinsTopGainers`](mdc:#getcoinstopgainers)
+- [`getCoinsTopVolume24h`](mdc:#getcoinstopvolume24h)
+- [`getCoinsMostValuable`](mdc:#getcoinsmostvaluable)
+- [`getCoinsNew`](mdc:#getcoinsnew)
+- [`getCoinsLastTraded`](mdc:#getcoinslasttraded)
+- [`getCoinsLastTradedUnique`](mdc:#getcoinslasttradedunique) 
+
+## Available Explore Queries
+
+### getCoinsTopGainers
+
+The `getCoinsTopGainers` function retrieves coins that have increased the most in market cap over the last 24 hours.
+
+#### Parameters
+
+```ts twoslash
+type ExploreQueryOptions = {
+  after?: string;     // Optional: Pagination cursor for fetching next page
+  count?: number;     // Optional: Number of coins to return per page (default: 20)
+};
+```
+
+#### Usage Example
+
+```ts twoslash
+import { getCoinsTopGainers } from "@zoralabs/coins-sdk";
+
+async function fetchTopGainers() {
+  const response = await getCoinsTopGainers({
+    count: 10,        // Optional: number of coins per page
+    after: undefined, // Optional: for pagination
+  });
+
+  const tokens = response.data?.exploreList?.edges?.map((edge: any) => edge.node);
+  
+  console.log(`Top Gainers (${tokens?.length || 0} coins):`);
+  
+  tokens?.forEach((coin: any, index: number) => {
+    const percentChange = coin.marketCapDelta24h 
+      ? `${parseFloat(coin.marketCapDelta24h).toFixed(2)}%` 
+      : "N/A";
+    
+    console.log(`${index + 1}. ${coin.name} (${coin.symbol})`);
+    console.log(`   24h Change: ${percentChange}`);
+    console.log(`   Market Cap: ${coin.marketCap}`);
+    console.log(`   Volume 24h: ${coin.volume24h}`);
+    console.log('-----------------------------------');
+  });
+  
+  // For pagination
+  if (response.data?.exploreList?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", response.data?.exploreList?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+### getCoinsTopVolume24h
+
+The `getCoinsTopVolume24h` function retrieves coins with the highest trading volume in the last 24 hours.
+
+#### Usage Example
+
+```ts twoslash
+import { getCoinsTopVolume24h } from "@zoralabs/coins-sdk";
+
+async function fetchTopVolumeCoins() {
+  const response = await getCoinsTopVolume24h({
+    count: 10,        // Optional: number of coins per page
+    after: undefined, // Optional: for pagination
+  });
+
+  const tokens = response.data?.exploreList?.edges?.map((edge: any) => edge.node);
+  
+  console.log(`Top Volume Coins (${tokens?.length || 0} coins):`);
+  
+  tokens?.forEach((coin: any, index: number) => {
+    console.log(`${index + 1}. ${coin.name} (${coin.symbol})`);
+    console.log(`   Volume 24h: ${coin.volume24h}`);
+    console.log(`   Market Cap: ${coin.marketCap}`);
+    console.log(`   Holders: ${coin.uniqueHolders}`);
+    console.log('-----------------------------------');
+  });
+  
+  // For pagination
+  if (response.data?.exploreList?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", response.data?.exploreList?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+### getCoinsMostValuable
+
+The `getCoinsMostValuable` function retrieves coins with the highest market capitalization.
+
+#### Usage Example
+
+```ts twoslash
+import { getCoinsMostValuable } from "@zoralabs/coins-sdk";
+
+async function fetchMostValuableCoins() {
+  const response = await getCoinsMostValuable({
+    count: 10,        // Optional: number of coins per page
+    after: undefined, // Optional: for pagination
+  });
+  
+  console.log(`Most Valuable Coins (${response.data?.exploreList?.edges?.length || 0} coins):`);
+  
+  response.data?.exploreList?.edges?.forEach((coin: any, index: number) => {
+    console.log(`${index + 1}. ${coin.node.name} (${coin.node.symbol})`);
+    console.log(`   Market Cap: ${coin.node.marketCap}`);
+    console.log(`   Volume 24h: ${coin.node.volume24h}`);
+    console.log(`   Created: ${coin.node.createdAt}`);
+    console.log('-----------------------------------');
+  });
+  
+  // For pagination
+  if (response.data?.exploreList?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", response.data?.exploreList?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+### getCoinsNew
+
+The `getCoinsNew` function retrieves the most recently created coins.
+
+#### Usage Example
+
+```ts twoslash
+import { getCoinsNew } from "@zoralabs/coins-sdk";
+
+async function fetchNewCoins() {
+  const response = await getCoinsNew({
+    count: 10,        // Optional: number of coins per page
+    after: undefined, // Optional: for pagination
+  });
+  
+  console.log(`New Coins (${response.data?.exploreList?.edges?.length || 0} coins):`);
+  
+  response.data?.exploreList?.edges?.forEach((coin: any, index: number) => {
+    // Format the creation date for better readability
+    const creationDate = new Date(coin.node.createdAt || "");
+    const formattedDate = creationDate.toLocaleString();
+    
+    console.log(`${index + 1}. ${coin.node.name} (${coin.node.symbol})`);
+    console.log(`   Created: ${formattedDate}`);
+    console.log(`   Creator: ${coin.node.creatorAddress}`);
+    console.log(`   Market Cap: ${coin.node.marketCap}`);
+    console.log('-----------------------------------');
+  });
+  
+  // For pagination
+  if (response.data?.exploreList?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", response.data?.exploreList?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+### getCoinsLastTraded
+
+The `getCoinsLastTraded` function retrieves coins that have been traded most recently.
+
+#### Usage Example
+
+```ts twoslash
+import { getCoinsLastTraded } from "@zoralabs/coins-sdk";
+
+async function fetchLastTradedCoins() {
+  const response = await getCoinsLastTraded({
+    count: 10,        // Optional: number of coins per page
+    after: undefined, // Optional: for pagination
+  });
+  
+  console.log(`Recently Traded Coins (${response.data?.exploreList?.edges?.length || 0} coins):`);
+  
+  response.data?.exploreList?.edges?.forEach((coin: any, index: number) => {
+    console.log(`${index + 1}. ${coin.node.name} (${coin.node.symbol})`);
+    console.log(`   Market Cap: ${coin.node.marketCap}`);
+    console.log(`   Volume 24h: ${coin.node.volume24h}`);
+    console.log('-----------------------------------');
+  });
+  
+  // For pagination
+  if (response.data?.exploreList?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", response.data?.exploreList?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+### getCoinsLastTradedUnique
+
+The `getCoinsLastTradedUnique` function retrieves coins that have been traded by unique traders most recently.
+
+#### Usage Example
+
+```ts twoslash
+import { getCoinsLastTradedUnique } from "@zoralabs/coins-sdk";
+
+async function fetchLastTradedUniqueCoins() {
+  const response = await getCoinsLastTradedUnique({
+    count: 10,        // Optional: number of coins per page
+    after: undefined, // Optional: for pagination
+  });
+  
+  console.log(`Recently Traded Coins by Unique Traders (${response.data?.exploreList?.edges?.length || 0} coins):`);
+  
+  response.data?.exploreList?.edges?.forEach((coin: any, index: number) => {
+    console.log(`${index + 1}. ${coin.node.name} (${coin.node.symbol})`);
+    console.log(`   Market Cap: ${coin.node.marketCap}`);
+    console.log(`   Volume 24h: ${coin.node.volume24h}`);
+    console.log(`   Unique Holders: ${coin.node.uniqueHolders}`);
+    console.log('-----------------------------------');
+  });
+  
+  // For pagination
+  if (response.data?.exploreList?.pageInfo?.endCursor) {
+    console.log("Next page cursor:", response.data?.exploreList?.pageInfo?.endCursor);
+  }
+  
+  return response;
+}
+```
+
+## Response Structure
+
+All explore queries return a similar response structure:
+
+```ts twoslash
+type Response = {
+  zora20Tokens?: Array<{
+    // Same structure as the coin object in getCoin response
+    id?: string;
+    name?: string;
+    description?: string;
+    address?: string;
+    symbol?: string;
+    totalSupply?: string;
+    totalVolume?: string;
+    volume24h?: string;
+    createdAt?: string;
+    creatorAddress?: string;
+    marketCap?: string;
+    marketCapDelta24h?: string;
+    chainId?: number;
+    uniqueHolders?: number;
+    // ... other coin properties
+  }>;
+  pagination?: {
+    cursor?: string;  // Cursor for the next page
+  };
+}
+```
+
+## Pagination
+
+Most explore queries support pagination to handle large result sets. Here's an example of how to implement pagination to fetch all coins that match a particular explore query:
+
+```ts twoslash
+import { getCoinsTopGainers } from "@zoralabs/coins-sdk";
+
+async function fetchAllTopGainers() {
+  let allCoins: any[] = [];
+  let cursor = undefined;
+  const pageSize = 20;
+  
+  // Continue fetching until no more pages
+  do {
+    const response = await getCoinsTopGainers({
+      count: pageSize,
+      after: cursor,
+    });
+    
+    // Add coins to our collection
+    if (response.data?.exploreList && response.data?.exploreList?.edges?.length || 0 > 0) {
+      allCoins = [...allCoins, ...(response.data?.exploreList?.edges?.map((edge: any) => edge.node) || [])];
+    }
+    
+    // Update cursor for next page
+    cursor = response.data?.exploreList?.pageInfo?.endCursor;
+    
+    // Break if no more results
+    if (!cursor || response.data?.exploreList?.edges?.length === 0) {
+      break;
+    }
+    
+  } while (true);
+  
+  console.log(`Fetched ${allCoins.length} total top gaining coins`);
+  return allCoins;
+}
+```
+
+{/* ### Trending Section
+
+<iframe src="https://codesandbox.io/embed/76s933?view=editor+%2B+preview&module=%2Fsrc%2FApp.tsx"
+     title="coins-leaderboard"
+     style={{width: '100%', height: '500px', border: '0', borderRadius: '4px', overflow: 'hidden'}}
+     sandbox="allow-forms allow-modals allow-popups allow-scripts"
+   ></iframe> */}
+
+# Onchain Queries
+
+The Coins SDK provides functions to query coin data directly from the blockchain. These queries are particularly useful in environments where API access is restricted or when you need guaranteed up-to-date information directly from the chain.
+
+## Overview
+
+While the [API queries](mdc:coins/sdk/queries/coin) provide extensive data with high performance, onchain queries have specific advantages:
+
+1. **Direct blockchain access**: Get data straight from the source without intermediaries
+2. **No API key required**: Only requires access to an RPC node
+3. **Real-time data**: Always returns the current state of the blockchain
+5. **Targeted user balances**: Efficiently retrieve a single user's balance without fetching all portfolio data
+
+## Available Onchain Queries
+
+### getOnchainCoinDetails
+
+The `getOnchainCoinDetails` function fetches detailed information about a coin directly from the blockchain:
+
+```ts twoslash
+import { getOnchainCoinDetails } from "@zoralabs/coins-sdk";
+import { createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+
+// Set up viem public client
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+async function fetchCoinDetails() {
+  const details = await getOnchainCoinDetails({
+    coin: "0xCoinContractAddress",
+    user: "0xOptionalUserAddress", // Optional: to get user's balance
+    publicClient,
+  });
+  
+  console.log("Coin market cap:", details.marketCap);
+  console.log("Coin liquidity:", details.liquidity);
+  console.log("Coin pool address:", details.pool);
+  console.log("Coin owners:", details.owners);
+  console.log("Payout recipient:", details.payoutRecipient);
+  
+  if (details.balance) {
+    console.log("User balance:", details.balance);
+  }
+  
+  return details;
+}
+```
+
+#### Parameters
+
+```ts twoslash
+import { Address, PublicClient } from "viem";
+
+type GetOnchainCoinDetailsParams = {
+  coin: Address;              // The coin contract address
+  user?: Address;             // Optional: User address to fetch balance for
+  publicClient: PublicClient; // Viem public client for blockchain calls
+};
+```
+
+#### Response Structure
+
+The function returns a `CoinDetailsOnchain` object with the following properties:
+
+```ts twoslash
+import { Address } from "viem";
+
+interface CoinDetailsOnchain {
+  // Basic Coin Information
+  address: Address;            // The coin contract address
+  decimals: number;            // Token decimals (usually 18)
+  name: string;                // Coin name
+  symbol: string;              // Coin symbol
+  totalSupply: bigint;         // Total supply of the coin
+  
+  // Pool Information
+  pool: Address;               // Uniswap V3 pool address
+  liquidity: bigint;           // Current pool liquidity
+  marketCap: bigint;           // Current market cap in wei
+  
+  // Governance
+  owners: Address[];           // Array of owner addresses
+  payoutRecipient: Address;    // Address receiving creator rewards
+  
+  // Optional User-specific Information
+  balance?: bigint;            // User's balance (only if user parameter provided)
+}
+```
+
+#### Use Cases
+
+1. **Retrieving Individual User Balances**
+
+When you need to check a single user's balance without fetching their entire portfolio:
+
+```ts twoslash
+import { Address, formatEther, createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+import { getOnchainCoinDetails } from "@zoralabs/coins-sdk";
+
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const userCoinBalance = await getOnchainCoinDetails({
+  coin: "0xCoinAddress" as Address,
+  user: "0xUserAddress" as Address,
+  publicClient,
+});
+
+console.log(`User has ${userCoinBalance.balance} tokens (${formatEther(userCoinBalance.balance)} ETH)`);
+```
+
+2. **Backend Services with Limited API Access**
+
+Useful for backend services where you might not want to manage API keys:
+
+```typescript
+// In a Node.js backend service
+async function getCoinMarketCap(coinAddress) {
+  const details = await getOnchainCoinDetails({
+    coin: coinAddress,
+    publicClient,
+  });
+  
+  return details.marketCap;
+}
+```
+
+## Parallelism
+
+Onchain queries are asynchronous and can be parallelized to improve performance:
+
+However, the best way to fetch information about multiple coins is to use the [`getCoins`](mdc:coins/sdk/queries/coin#getcoins) query instead.
+That query is optimized for fetching multiple coins in a single request and individual or large RPC calls can get quite expensive and slow.
+Additionally, this API does not support or retrieve metadata.
+
+```typescript
+const coinAddresses = ["0xCoin1", "0xCoin2", "0xCoin3"];
+const detailsPromises = coinAddresses.map(address => 
+  getOnchainCoinDetails({ coin: address, publicClient })
+);
+const allCoinDetails = await Promise.all(detailsPromises);
+```
+
+
+# Coins Contracts Introduction
+
+Coins contracts consist of one immutable ERC20 contract that becomes your Coin, and another smart contract that acts as a factory to create new Coin contracts.
+
+## Overview
+
+The Zora Coins protocol provides a comprehensive suite of smart contracts that enable creators to launch their own social tokens with built-in liquidity and reward mechanisms. These contracts are designed to be simple to use while providing powerful functionality for token economies.
+
+## Key Components
+
+The Coins ecosystem consists of several integrated contracts that work together:
+
+1. **[Coin Contract](mdc:coins/contracts/coin)** - The core ERC20 token implementation that powers each creator's social token. This contract handles token transfers, approvals, and other standard ERC20 functionality with additional features specific to Zora Coins.
+
+2. **[Factory Contract](mdc:coins/contracts/factory)** - The entry point for creating new Coins. This contract deploys new Coin contracts, sets up Uniswap V3 pools, and manages the initial liquidity provision. All new Coins are created through this factory.
+
+3. **[Metadata](mdc:coins/contracts/metadata)** - The metadata specification for Zora Coins, detailing how token information is structured and accessed.
+
+4. **[Rewards System](mdc:coins/contracts/rewards)** - The mechanism that enables creators to earn rewards through various on-chain activities, including NFT minting and trading.
+
+## Getting Started
+
+To interact with these contracts programmatically, you can use the [Coins SDK](mdc:coins/sdk) which provides a simple interface for creating and managing Coins.
+
+For technical details on the contract implementations, deployment addresses, and specific method documentation, explore the links above.
+
+
+# `ZoraFactory.sol`
+
+The `ZoraFactory` contract is an upgradeable contract which is the canonical factory for coins.
+
+The contract is upgradable by the Zora team to update coin features, but any deployed coins are immutable and cannot be updated.
+
+## Overview
+
+The `ZoraFactory` implements the `IZoraFactory` interface and serves as the entry point for creating new coins in the ZORA Coins Protocol. It handles the deployment of both V3 (Uniswap V3) and V4 (Uniswap V4) coin contracts, their associated pools, and the initial setup of liquidity.
+
+The factory automatically determines whether to deploy a V3 or V4 coin based on the pool configuration provided.
+
+## Canonical Deployment Address
+
+| Chain       | Chain ID | Contract Name | Address                                                                 |
+|-------------|----------|---------------|-------------------------------------------------------------------------|
+| Base        | 8453     | `ZoraFactory` | [0x777777751622c0d3258f214F9DF38E35BF45baF3](mdc:https:/basescan.org/address/0x777777751622c0d3258f214F9DF38E35BF45baF3) |
+| Base Sepolia| 84532    | `ZoraFactory` | [0x777777751622c0d3258f214F9DF38E35BF45baF3](mdc:https:/sepolia.basescan.org/address/0x777777751622c0d3258f214F9DF38E35BF45baF3) |
+
+
+### Key Methods
+
+#### deploy (Current Recommended Method)
+
+```solidity
+function deploy(
+    address payoutRecipient,
+    address[] memory owners,
+    string memory uri,
+    string memory name,
+    string memory symbol,
+    bytes memory poolConfig,
+    address platformReferrer,
+    address postDeployHook,
+    bytes calldata postDeployHookData,
+    bytes32 coinSalt
+) external payable returns (address coin, bytes memory postDeployHookDataOut);
+```
+
+This is the current recommended function for creating a new coin contract with the specified parameters and its associated Uniswap pool.
+
+Parameters:
+- `payoutRecipient`: The recipient of creator reward payouts; this can be updated by any owner later on
+- `owners`: An array of addresses that will have permission to manage the coin's payout address and metadata URI
+- `uri`: The coin metadata URI (should be an IPFS URI)
+- `name`: The name of the coin (e.g., "horse galloping")
+- `symbol`: The trading symbol for the coin (e.g., "HORSE")
+- `poolConfig`: Encoded pool configuration that determines V3 vs V4 deployment and pool parameters
+- `platformReferrer`: The address that will receive platform referral rewards from trades
+- `postDeployHook`: Address of a contract implementing the `IHasAfterCoinDeploy` interface that runs after deployment
+- `postDeployHookData`: Custom data to be passed to the post-deployment hook
+- `coinSalt`: Salt for deterministic deployment, enables predictable coin addresses
+
+Returns:
+- The address of the deployed coin contract
+- Any data returned from the post-deployment hook
+
+#### coinAddress
+
+```solidity
+function coinAddress(
+    address msgSender,
+    string memory name,
+    string memory symbol,
+    bytes memory poolConfig,
+    address platformReferrer,
+    bytes32 coinSalt
+) external view returns (address);
+```
+
+This function allows you to predict the address of a coin contract before it's deployed. Useful for preparing integrations.
+
+Parameters:
+- `msgSender`: The address that will call the deploy function
+- `name`: The name of the coin
+- `symbol`: The symbol of the coin
+- `poolConfig`: The pool configuration
+- `platformReferrer`: The platform referrer address
+- `coinSalt`: The salt to be used for deployment
+
+Returns:
+- The address where the coin will be deployed
+
+#### Deprecated Deploy Functions
+
+The factory also contains several deprecated deployment functions that are maintained for backward compatibility:
+
+```solidity
+// Deprecated: Use the recommended deploy function instead
+function deploy(
+    address payoutRecipient,
+    address[] memory owners,
+    string memory uri,
+    string memory name,
+    string memory symbol,
+    bytes memory poolConfig,
+    address platformReferrer,
+    uint256 orderSize
+) external payable returns (address, uint256);
+
+// Deprecated: Use the recommended deploy function instead
+function deployWithHook(
+    address payoutRecipient,
+    address[] memory owners,
+    string memory uri,
+    string memory name,
+    string memory symbol,
+    bytes memory poolConfig,
+    address platformReferrer,
+    address hook,
+    bytes calldata hookData
+) external payable returns (address coin, bytes memory hookDataOut);
+```
+
+These older functions don't use deterministic deployment, meaning you can't predict coin addresses before deployment. The current recommended `deploy` function supports deterministic addresses and post-deployment hooks in a single operation.
+
+#### Pool Configuration
+
+The `poolConfig` parameter is a bytes-encoded configuration that determines:
+- **Version**: Whether to deploy V3 or V4 coin
+- **Currency**: The trading pair currency (can be address(0) for ETH/WETH)
+- **Pool Parameters**: Fee tier, tick spacing, and other pool-specific settings
+
+For V4 coins, additional parameters include:
+- **Hook Configuration**: Advanced pool behavior settings
+- **Multi-Position Setup**: Support for complex liquidity curves
+- **Reward Routing**: Multi-hop swap path configuration
+
+Notes:
+- When creating a coin with ETH/WETH, you must send ETH with the transaction equal to the `orderSize` parameter
+- For other currencies, the factory will pull the specified amount from your wallet (requires approval)
+- V4 coins support more advanced features like multi-hop reward distribution
+
+### Events
+
+#### CoinCreated (V3)
+
+```solidity
+event CoinCreated(
+    address indexed caller,
+    address indexed payoutRecipient,
+    address indexed platformReferrer,
+    address currency,
+    string uri,
+    string name,
+    string symbol,
+    address coin,
+    address pool,
+    string version
+);
+```
+
+Emitted when a new V3 coin is created through the factory.
+
+Event Parameters:
+- `caller`: The address that called the deploy function
+- `payoutRecipient`: The address of the creator payout recipient
+- `platformReferrer`: The address of the platform referrer
+- `currency`: The address of the trading currency
+- `uri`: The metadata URI of the coin
+- `name`: The name of the coin
+- `symbol`: The symbol of the coin
+- `coin`: The address of the newly created coin contract
+- `pool`: The address of the associated Uniswap V3 pool
+- `version`: The version string of the coin implementation
+
+#### CoinCreatedV4 (V4)
+
+```solidity
+event CoinCreatedV4(
+    address indexed caller,
+    address indexed payoutRecipient,
+    address indexed platformReferrer,
+    address currency,
+    string uri,
+    string name,
+    string symbol,
+    address coin,
+    PoolKey poolKey,
+    bytes32 poolKeyHash,
+    string version
+);
+```
+
+Emitted when a new V4 coin is created through the factory.
+
+Event Parameters:
+- `caller`: The address that called the deploy function
+- `payoutRecipient`: The address of the creator payout recipient
+- `platformReferrer`: The address of the platform referrer
+- `currency`: The address of the trading currency
+- `uri`: The metadata URI of the coin
+- `name`: The name of the coin
+- `symbol`: The symbol of the coin
+- `coin`: The address of the newly created coin contract
+- `poolKey`: The Uniswap V4 pool key struct
+- `poolKeyHash`: Hash of the pool key for efficient indexing
+- `version`: The version string of the coin implementation
+
+### Error Handling
+
+The factory defines custom errors to provide specific information about failed operations:
+
+- `ERC20TransferAmountMismatch`: The amount of ERC20 tokens transferred does not match the expected amount
+- `EthTransferInvalid`: ETH is sent with a transaction but the currency is not WETH
+
+## Usage with SDK
+
+While you can interact directly with the factory contract, it's recommended to use the Zora Coins SDK which handles the complexities of coin creation and automatically selects the appropriate version:
+
+```typescript
+import { createCoin } from "@zoralabs/coins-sdk";
+import { createWalletClient, createPublicClient, http } from "viem";
+import { base } from "viem/chains";
+import { Address, Hex, parseEther } from "viem";
+
+// Set up viem clients
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+const walletClient = createWalletClient({
+  account: "0x<YOUR_ACCOUNT>" as Hex,
+  chain: base,
+  transport: http("<RPC_URL>"),
+});
+
+// Define coin parameters
+const coinParams = {
+  name: "My Awesome Coin",
+  symbol: "MAC",
+  uri: "ipfs://bafkreihz5knnvvsvmaxlpw3kout23te6yboquyvvs72wzfulgrkwj7r7dm",
+  payoutRecipient: "0xYourAddress" as Address,
+  platformReferrer: "0xYourPlatformReferrerAddress" as Address, // Optional
+  initialPurchaseWei: parseEther("0.1"), // Optional: Initial amount to purchase in Wei
+  // The SDK will automatically select V4 for new coins unless specified otherwise
+  version: "v4", // Optional: Force specific version
+};
+
+// Create the coin
+const result = await createCoin(coinParams, walletClient, publicClient);
+console.log("Coin address:", result.address);
+console.log("Coin version:", result.version); // "v3" or "v4"
+```
+
+## Version Selection
+
+The factory automatically determines which version to deploy based on several factors:
+
+1. **Pool Configuration**: V4-specific configurations will deploy V4 coins
+2. **Currency Type**: Certain currency configurations may prefer specific versions
+3. **Feature Requirements**: Advanced features like multi-hop rewards require V4
+
+### V3 vs V4 Feature Comparison
+
+| Feature | V3 | V4 |
+|---------|----|----|
+| Basic Trading | ✅ | ✅ |
+| ERC20 Functionality | ✅ | ✅ |
+| Simple Reward Distribution | ✅ | ✅ |
+| Multi-Hop Reward Swapping | ❌ | ✅ |
+| Advanced Hook System | ❌ | ✅ |
+| Complex Liquidity Curves | ❌ | ✅ |
+| Gas Efficiency | Good | Better |
+| Pool Customization | Limited | Extensive |
+
+## Advanced Configuration
+
+### Currency Options
+
+When creating a coin, you have multiple options for the trading currency:
+
+1. **ETH/WETH**: Use `address(0)` for the currency parameter. This is the most common option, allowing users to buy and sell coins with ETH.
+
+2. **ERC20 Token**: Specify the address of an ERC20 token. This creates a coin that trades against that specific token.
+
+3. **Other Coins (V4 Only)**: V4 coins can be paired with other coins, enabling complex reward distribution chains.
+
+### Initial Purchase
+
+The `orderSize` parameter (or `initialPurchaseWei` in the SDK) determines the initial purchase amount when creating a coin:
+
+- Setting this to a non-zero value creates initial liquidity in the pool
+- For ETH/WETH coins, this amount must be sent with the transaction
+- For ERC20 coins, the factory must be approved to spend this amount
+
+### V4-Specific Configuration
+
+V4 coins support additional configuration options:
+
+- **Multi-Position Liquidity**: Automatically create multiple liquidity positions for better price discovery
+- **Custom Hook Logic**: Advanced pool behavior and fee collection
+- **Swap Path Optimization**: Intelligent routing for multi-hop reward distribution
+
+## Security Considerations
+
+- The factory is the only contract allowed to create official ZORA protocol coins
+- Platform referrer addresses are permanently set at creation and cannot be changed
+- Owner addresses have some control over the coin (metadata, payout recipient)
+- V3 coins are processed through Uniswap V3 pools, subject to their slippage and price impact mechanics
+- V4 coins benefit from improved hooks and better MEV protection
+- All coin versions maintain the same security guarantees for immutability after deployment
+
+
+# `CoinV4.sol`
+
+The `CoinV4` contract is the core contract for the Zora Coins Protocol. It is a non-upgradeable ERC20 contract built on Uniswap V4 that allows for the creation of media coins with advanced hook-based functionality.
+
+## Overview
+
+The `CoinV4` contract implements multiple interfaces:
+- `ICoinV4`: Core V4 coin functionality
+- `IHasPoolKey`: Provides access to the Uniswap V4 pool key
+- `IHasSwapPath`: Enables complex multi-hop reward distribution
+- `IERC165`: Standard interface detection
+- `IERC7572`: Standard for protocol-specific metadata
+
+Each coin is created with a Uniswap V4 liquidity pool and an advanced hook system that automatically handles fee collection and reward distribution.
+
+## Inheritance Structure
+
+`CoinV4` inherits from `BaseCoin`, which provides core ERC20 functionality, multi-ownership capabilities, and metadata management. The inheritance hierarchy is:
+
+```
+CoinV4 → BaseCoin → ERC20PermitUpgradeable → MultiOwnable → ReentrancyGuardUpgradeable → ContractVersionBase
+```
+
+## Key Features
+
+- **ERC20 Functionality**: Basic token transfers, approvals, and balance tracking
+- **Uniswap V4 Integration**: Built-in hooks for advanced pool management and automatic fee processing
+- **Automatic Reward Distribution**: Hooks that collect LP fees, swap them to backing currency, and distribute rewards on every trade
+- **Multi-Hop Fee Conversion**: Supports complex swap paths for coins paired with other coins
+- **Advanced Pool Configuration**: Support for multiple liquidity positions and sophisticated market curves
+- **Metadata Management**: Updatable contract metadata via URI
+- **Multi-Ownership**: Support for multiple owners with permission control
+
+## Hook System
+
+The `CoinV4` contract uses the `ZoraV4CoinHook` which automatically executes on every swap to handle reward distribution. The hook has permissions for `afterInitialize` and `afterSwap` operations on the Uniswap V4 pool and performs three key operations:
+
+### 1. Collect LP Fees
+On every swap, the hook collects accrued fees from all liquidity positions in the pool using the `V4Liquidity.collectFees` library function. These fees are generated from trading activity and accumulate over time.
+
+### 2. Swap LP Fees to Backing Currency
+The collected fees are automatically swapped to the backing currency through optimal swap paths using the `UniV4SwapToCurrency.swapToPath` library function. For example:
+- If a coin is paired directly with USDC, fees are swapped directly to USDC
+- If a coin is paired with another coin (like a backing coin), the fees follow the swap path: `ContentCoin → BackingCoin → USDC`
+
+### 3. Distribute Rewards
+The final backing currency is then distributed to reward recipients using predefined basis points (BPS):
+- **Creator**: 50% to the payout recipient (`CREATOR_REWARD_BPS = 5000`)
+- **Create Referral**: 15% to the platform that referred the creator (`CREATE_REFERRAL_REWARD_BPS = 1500`)
+- **Trade Referral**: 15% to the platform that referred this specific trade (`TRADE_REFERRAL_REWARD_BPS = 1500`)
+- **Protocol**: 20% to the ZORA protocol treasury (calculated as the remainder after other distributions)
+- **Doppler**: 5% to the governance entity (`DOPPLER_REWARD_BPS = 500`)
+
+All of this happens automatically in a single transaction whenever someone trades the coin.
+
+## Pool Configuration
+
+The pool configuration is defined by the `PoolConfiguration` struct which contains:
+```solidity
+struct PoolConfiguration {
+    uint8 version;           // Configuration version
+    uint16 numPositions;     // Number of liquidity positions
+    uint24 fee;              // Fee tier for the pool
+    int24 tickSpacing;       // Tick spacing for the pool
+    uint16[] numDiscoveryPositions;  // Number of discovery positions
+    int24[] tickLower;       // Lower tick bounds for positions
+    int24[] tickUpper;       // Upper tick bounds for positions
+    uint256[] maxDiscoverySupplyShare; // Maximum share for discovery supply
+}
+```
+
+This configuration allows for custom market curves with multiple liquidity positions.
+
+## Core Functions
+
+### Pool and Configuration
+
+#### getPoolKey
+
+```solidity
+function getPoolKey() external view returns (PoolKey memory);
+```
+
+Returns the Uniswap V4 pool key associated with this coin, containing pool identification parameters including currencies, fee tier, tick spacing, and hooks.
+
+#### getPoolConfiguration
+
+```solidity
+function getPoolConfiguration() external view returns (PoolConfiguration memory);
+```
+
+Returns the pool configuration settings including fee structure, tick spacing, number of positions, and liquidity curve parameters.
+
+#### hooks
+
+```solidity
+function hooks() external view returns (IHooks);
+```
+
+Returns the hooks contract (ZoraV4CoinHook) that handles pool lifecycle events like swaps and automatic reward distribution.
+
+### Swap Path for Multi-Hop Rewards
+
+#### getPayoutSwapPath
+
+```solidity
+function getPayoutSwapPath(IDeployedCoinVersionLookup coinVersionLookup) external view returns (PayoutSwapPath memory);
+```
+
+Returns the swap path configuration for converting this coin's fees to its final payout currency. This enables multi-hop swaps through intermediate currencies.
+
+The `PayoutSwapPath` struct contains:
+- `currencyIn`: The input currency (this coin)
+- `path`: Array of swap steps to reach the final payout currency
+
+Example for a content coin paired with a backing coin:
+1. Content coin → Backing coin (first hop)
+2. Backing coin → USDC (second hop)
+
+### Coin Trades
+
+#### burn
+
+```solidity
+function burn(uint256 amount) external;
+```
+
+Allows users to burn their own tokens, permanently removing them from circulation.
+
+### Management Functions
+
+#### setContractURI
+
+```solidity
+function setContractURI(string memory newURI) external onlyOwner;
+```
+
+Updates the coin's metadata URI. This can only be called by an owner of the coin.
+
+#### setPayoutRecipient
+
+```solidity
+function setPayoutRecipient(address newPayoutRecipient) external onlyOwner;
+```
+
+Updates the address that receives creator rewards. This can only be called by an owner of the coin.
+
+### Query Functions
+
+```solidity
+function tokenURI() external view returns (string memory);
+function platformReferrer() external view returns (address);
+function currency() external view returns (address);
+```
+
+These functions provide access to key coin information:
+- `tokenURI`: Returns the coin's metadata URI
+- `platformReferrer`: Returns the address of the platform referrer who earns fees from trades
+- `currency`: Returns the address of the backing currency this coin is paired with
+
+## Events
+
+### Hook Events
+
+#### Swapped
+
+```solidity
+event Swapped(
+    address indexed sender,
+    address indexed swapSender,
+    bool isTrustedSwapSenderAddress,
+    PoolKey key,
+    bytes32 indexed poolKeyHash,
+    SwapParams params,
+    int128 amount0,
+    int128 amount1,
+    bool isCoinBuy,
+    bytes hookData,
+    uint160 sqrtPriceX96
+);
+```
+
+Emitted by the hook when a swap occurs, providing detailed information about the transaction including price data and swap direction.
+
+#### CoinMarketRewardsV4
+
+```solidity
+event CoinMarketRewardsV4(
+    address indexed coin,
+    address indexed currency,
+    address indexed payoutRecipient,
+    address platformReferrer,
+    address tradeReferrer,
+    address protocolRewardRecipient,
+    address dopplerRecipient,
+    MarketRewardsV4 marketRewards
+);
+```
+
+Emitted when market rewards are distributed, showing exactly how much each recipient received in the backing currency.
+
+### Coin Events
+
+#### CoinBuy
+
+```solidity
+event CoinBuy(
+    address indexed buyer,
+    address indexed recipient,
+    address indexed tradeReferrer,
+    uint256 coinsPurchased,
+    address currency,
+    uint256 amountFee,
+    uint256 amountSold
+);
+```
+
+Emitted when coins are purchased, tracking the buyer, recipient, trade referrer, amount of coins purchased, currency used, fees paid, and total amount spent.
+
+#### CoinSell
+
+```solidity
+event CoinSell(
+    address indexed seller,
+    address indexed recipient,
+    address indexed tradeReferrer,
+    uint256 coinsSold,
+    address currency,
+    uint256 amountFee,
+    uint256 amountPurchased
+);
+```
+
+Emitted when coins are sold, tracking the seller, recipient, trade referrer, amount of coins sold, currency received, fees paid, and total amount received.
+
+#### CoinTransfer
+
+```solidity
+event CoinTransfer(
+    address indexed sender,
+    address indexed recipient,
+    uint256 amount,
+    uint256 senderBalance,
+    uint256 recipientBalance
+);
+```
+
+Emitted on any token transfer, providing detailed information about the transfer including updated balances.
+
+#### ContractMetadataUpdated
+
+```solidity
+event ContractMetadataUpdated(
+    address indexed caller,
+    string newURI,
+    string name
+);
+```
+
+Emitted when the contract metadata URI is updated.
+
+#### CoinPayoutRecipientUpdated
+
+```solidity
+event CoinPayoutRecipientUpdated(
+    address indexed caller,
+    address indexed prevRecipient,
+    address indexed newRecipient
+);
+```
+
+Emitted when the payout recipient is updated.
+
+#### ContractURIUpdated
+
+```solidity
+event ContractURIUpdated();
+```
+
+Emitted when the contract URI is updated, used for standards compliance with ERC7572.
+
+#### CoinTradeRewards
+
+```solidity
+event CoinTradeRewards(
+    address indexed payoutRecipient,
+    address indexed platformReferrer,
+    address indexed tradeReferrer,
+    address protocolRewardRecipient,
+    uint256 creatorReward,
+    uint256 platformReferrerReward,
+    uint256 traderReferrerReward,
+    uint256 protocolReward,
+    address currency
+);
+```
+
+Emitted when trade rewards are distributed, showing the breakdown of rewards to each recipient.
+
+## Error Handling
+
+The contract defines several custom errors that provide specific information about failed operations:
+
+### Common Errors
+
+- `AddressZero`: Operation attempted with a zero address
+- `InsufficientFunds`: Insufficient funds for the operation
+- `InsufficientLiquidity`: Insufficient liquidity for a transaction
+- `SlippageBoundsExceeded`: Slippage bounds exceeded during a transaction
+- `InitialOrderSizeTooLarge`: Initial order size too large
+- `EthAmountMismatch`: ETH value doesn't match the currency amount
+- `EthAmountTooSmall`: ETH amount too small for the transaction
+- `ERC20TransferAmountMismatch`: Unexpected ERC20 transfer amount
+- `EthTransferInvalid`: Invalid ETH transfer
+- `EthTransferFailed`: ETH transfer failed
+- `OnlyPool`: Operation attempted by an entity other than the pool
+- `OnlyWeth`: Operation attempted by an entity other than WETH
+- `MarketNotGraduated`: Market is not yet graduated
+- `MarketAlreadyGraduated`: Market is already graduated
+- `InvalidCurrencyLowerTick`: Lower tick is not less than maximum or not a multiple of 200
+- `InvalidWethLowerTick`: Lower tick is not set to the default value
+- `LegacyPoolMustHaveOneDiscoveryPosition`: Legacy pool does not have one discovery position
+- `DopplerPoolMustHaveMoreThan2DiscoveryPositions`: Doppler pool doesn't have enough discovery positions
+- `InvalidPoolVersion`: Invalid pool version specified
+
+### Hook-Specific Errors
+
+- `NotACoin`: Non-coin contract attempted to use V4 hook
+- `NoCoinForHook`: Pool not properly initialized for hook
+- `PathMustHaveAtLeastOneStep`: Invalid swap path configuration for multi-hop rewards
+- `CoinVersionLookupCannotBeZeroAddress`: Version lookup contract cannot be zero address
+# Coins Metadata
+
+Coins follow the [EIP-7572](mdc:https:/eips.ethereum.org/EIPS/eip-7572) standard for metadata.
+
+This is based off of the `EIP721` and `EIP1155` metadata standards.
+
+We have a guide below for recommended format along with ZORA extensions and validator tools:
+
+## Metadata JSON Format
+
+Your metadata JSON file should follow this format:
+
+```json
+{
+  "name": "horse",
+  "description": "boundless energy",
+  "image": "ipfs://bafkreifch6stfh3fn3nqv5tpxnknjpo7zulqav55f2b5pryadx6hldldwe",
+  "properties": {
+    "category": "social"
+  }
+}
+    ```
+
+Optionally, for non-image assets, the `animation_url` property can be used to link an audio or video file preferably on IPFS.
+
+The `content` property extension is an object that contains the mime type and uri of the asset to help with better indexing and is more consistent than the opensea-specific animation_url field.
+
+```json
+{
+  "name": "boundless horse",
+  "description": "boundless horse",
+  "image": "ipfs://bafkreifch6stfh3fn3nqv5tpxnknjpo7zulqav55f2b5pryadx6hldldwe",
+  "animation_url": "ipfs://bafybeiatmngyt4wwu6mla27523qk33klxopycomegris3n25y6rcqs27c4",
+  "content": {
+    "mime": "video/mp4",
+    "uri": "ipfs://bafybeiatmngyt4wwu6mla27523qk33klxopycomegris3n25y6rcqs27c4"
+  },
+  "properties": {
+    "category": "social"
+  }
+}
+```
+
+## Metadata JSON Validator
+
+We have a validator that can be used to check your metadata JSON.
+
+The two supported functions are:
+
+- `validateMetadata`
+- `validateMetadataURI`
+
+### validateMetadata
+
+This function validates the metadata JSON file.
+
+```ts twoslash
+import { validateMetadataJSON } from "@zoralabs/coins-sdk";
+
+validateMetadataJSON({
+    name: "horse",
+    description: "boundless energy",
+    image: 123,
+    foo: "bar"
+})
+
+```
+
+This function will throw an error if the metadata is invalid and return `true` if it is valid.
+
+### validateMetadataURI
+
+This function validates the metadata URI.
+
+```ts twoslash
+
+function assertTrue(condition: boolean) { }
+
+// ---cut---
+import { validateMetadataURIContent } from "@zoralabs/coins-sdk";
+
+assertTrue(await validateMetadataURIContent("https://theme.wtf/metadata/metadata.json"));
+
+// This will throw an error
+await validateMetadataURIContent("data:foo");
+
+// This will succeed :)
+await validateMetadataURIContent("ipfs://bafybeigoxzqzbnxsn35vq7lls3ljxdcwjafxvbvkivprsodzrptpiguysy");
+
+```
+
+This function will throw an error if the metadata URI is invalid and return `true` if it is valid.
+
+
+
+
+
+
+

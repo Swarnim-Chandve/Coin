@@ -42,6 +42,10 @@ export default function CoinItPage() {
   const [modalMsg, setModalMsg] = useState<string>("");
   const [newCoinAddress, setNewCoinAddress] = useState<string | null>(null);
 
+  // New: AI image generation state
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
   // Frame ready for MiniKit
   useEffect(() => {
     if (!isFrameReady) setFrameReady();
@@ -78,9 +82,11 @@ export default function CoinItPage() {
     setError(null);
     
     try {
-      // TODO: Handle uploadedFile with multipart/form-data
+      // If a file is uploaded, skip process-memory and go straight to preview
       if (uploadedFile) {
-        throw new Error("File uploads are not implemented yet.");
+        // Already handled in handleFileChange, so just return
+        setLoading(false);
+        return;
       }
 
       const res = await fetch("/api/process-memory", {
@@ -109,6 +115,24 @@ export default function CoinItPage() {
     if (file) {
       setUploadedFile(file);
       setMemoryInput(''); // Clear text input if file is selected
+      setLoading(true);
+      setError(null);
+      // Convert file to base64 and set as preview
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const base64 = ev.target?.result as string;
+        setPreview({
+          imageUrl: base64,
+          title: file.name || 'Uploaded Image',
+          description: 'A memory minted from your uploaded file.'
+        });
+        setLoading(false);
+      };
+      reader.onerror = () => {
+        setError('Failed to read file.');
+        setLoading(false);
+      };
+      reader.readAsDataURL(file);
     }
   }
 
@@ -207,6 +231,21 @@ export default function CoinItPage() {
             setNewCoinAddress(coinData.address);
             setStatus("success");
             setModalMsg("Your coin is live! View it on Zora below.");
+            // New: Save memory to gallery
+            try {
+              await fetch("/api/memories", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  image: formData.image,
+                  title: formData.name,
+                  description: formData.description,
+                  owner: address,
+                  coinAddress: coinData.address,
+                  zoraUrl: url,
+                }),
+              });
+            } catch (e) { /* ignore errors for now */ }
           } else {
             setStatus("error");
             setModalMsg(coinData.message || coinData.error || "Failed to create coin");
@@ -233,17 +272,43 @@ export default function CoinItPage() {
     }
   }
 
+  // New: Generate image with Gemini API
+  async function handleGenerateImage() {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: memoryInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.image) {
+        setPreview({
+          imageUrl: `data:image/png;base64,${data.image}`,
+          title: memoryInput.slice(0, 32) || 'AI Generated Memory',
+          description: memoryInput,
+        });
+      } else {
+        setAiError(data.error || 'Failed to generate image.');
+      }
+    } catch (err: unknown) {
+      setAiError(err instanceof Error ? err.message : 'Unknown error.');
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   const inFrameContext = context !== null;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 text-gray-900 font-sans mini-app-theme">
-      {/* Debug info for troubleshooting */}
-      <div className="fixed top-2 left-2 z-50 text-xs bg-white/80 px-2 py-1 rounded shadow text-gray-700">
-        <span>inFrameContext: {String(inFrameContext)} | isWalletConnected: {String(isWalletConnected)}</span>
-      </div>
-      {/* App Title */}
+      {/* Main Header with Gallery Link */}
       <header className="flex flex-col items-center pt-6 pb-2 w-full max-w-2xl mx-auto px-2 sm:px-4">
-        <span className="font-extrabold text-4xl sm:text-5xl tracking-tight mb-2 text-center select-none text-black drop-shadow-lg" style={{letterSpacing: '-0.03em'}}>coin it</span>
+        <div className="w-full flex justify-between items-center mb-2">
+          <span className="font-extrabold text-4xl sm:text-5xl tracking-tight text-black drop-shadow-lg select-none" style={{letterSpacing: '-0.03em'}}>coin it</span>
+          <a href="/gallery" className="ml-auto px-4 py-2 bg-blue-600 text-white rounded-xl font-bold shadow hover:bg-blue-700 transition text-base">Gallery</a>
+        </div>
         <div className="w-full max-w-md flex flex-col items-center mb-2">
           <div className="bg-white rounded-2xl shadow-md px-4 sm:px-8 py-4 flex flex-col items-center w-full">
             {address ? (
@@ -263,6 +328,10 @@ export default function CoinItPage() {
           </div>
         </div>
       </header>
+      {/* Debug info for troubleshooting */}
+      <div className="fixed top-2 left-2 z-50 text-xs bg-white/80 px-2 py-1 rounded shadow text-gray-700">
+        <span>inFrameContext: {String(inFrameContext)} | isWalletConnected: {String(isWalletConnected)}</span>
+      </div>
       {/* Main Card Content */}
       <main className="flex-1 flex flex-col items-center justify-center px-2 sm:px-4 w-full max-w-2xl mx-auto">
         <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl px-4 sm:px-8 py-6 sm:py-8 flex flex-col items-center">
@@ -287,6 +356,21 @@ export default function CoinItPage() {
                 autoFocus
                 disabled={loading}
               />
+
+              {/* New: AI image generation button for text-only input */}
+              {memoryInput.trim() && !uploadedFile && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="lg"
+                  className="w-full text-lg sm:text-xl py-3 sm:py-4 bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-xl shadow-lg hover:from-purple-600 hover:to-blue-600 focus:ring-4 focus:ring-[var(--app-accent-light)]"
+                  onClick={handleGenerateImage}
+                  disabled={aiLoading}
+                >
+                  {aiLoading ? 'Generating Image...' : 'Generate Image with AI'}
+                </Button>
+              )}
+              {aiError && <div className="text-red-500 text-sm mt-2">{aiError}</div>}
 
               <div className="w-full flex items-center justify-center">
                 <span className="flex-grow border-t border-gray-200"></span>

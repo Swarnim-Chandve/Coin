@@ -13,8 +13,18 @@ export function Providers(props: { children: ReactNode }) {
         appearance: {
           mode: "auto",
           theme: "mini-app-theme",
-          name: process.env.NEXT_PUBLIC_ONCHAINKIT_PROJECT_NAME,
+          name: "Remind",
           logo: process.env.NEXT_PUBLIC_ICON_URL,
+          accentColor: "#6366F1",
+          borderRadius: "0.75rem",
+        },
+        connect: {
+          showBalance: true,
+          showProfileImage: true,
+        },
+        notifications: {
+          enabled: true,
+          defaultDuration: 3000,
         },
       }}
     >

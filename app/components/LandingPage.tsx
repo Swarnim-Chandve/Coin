@@ -302,9 +302,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
         {/* Animated Title */}
         <div className="text-center mb-12">
           <motion.div className="relative">
-            {/* Letter by letter animation for "Rewind" */}
+            {/* Letter by letter animation for "Remind" */}
             <div className="font-playfair text-8xl md:text-9xl font-bold text-[#3D4852] mb-4 flex justify-center">
-              {['R', 'e', 'w', 'i', 'n', 'd'].map((letter, index) => (
+              {['R', 'e', 'm', 'i', 'n', 'd'].map((letter, index) => (
                 <motion.span
                   key={index}
                   initial={{ opacity: 0, y: 100, rotate: 45 }}
@@ -312,16 +312,23 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
                     opacity: 1, 
                     y: 0, 
                     rotate: 0,
-                    color: ['#3D4852', '#A8C5D4', '#3D4852']
+                    color: [
+                      'var(--app-accent)',
+                      '#F59E0B',
+                      '#10B981',
+                      '#6366F1',
+                      '#EF4444',
+                      '#818CF8',
+                    ][index % 6]
                   }}
                   transition={{ 
                     duration: 0.8, 
                     delay: index * 0.2,
                     color: { duration: 2, repeat: Infinity, delay: 2 }
                   }}
-                  className="inline-block"
+                  className="inline-block text-gradient drop-shadow-lg"
                   style={{
-                    textShadow: '0 4px 8px rgba(61, 72, 82, 0.2)',
+                    textShadow: '0 4px 16px rgba(99,102,241,0.2)',
                     filter: 'url(#childDrawing)'
                   }}
                 >
@@ -374,6 +381,15 @@ const LandingPage: React.FC<LandingPageProps> = ({ onEnter }) => {
                 </motion.div>
               </>
             )}
+          </motion.div>
+          {/* Slogan */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.5, duration: 0.8 }}
+            className="text-2xl md:text-3xl font-semibold text-center text-gradient mb-6"
+          >
+            Mint Every Memory
           </motion.div>
           {/* Subtitle */}
           <motion.p
