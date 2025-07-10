@@ -8,8 +8,27 @@
 
 Codebase: https://github.com/Swarnim-Chandve/Coin
 Video Demo 1: https://www.loom.com/share/21b4c8bcb35141748ccc2c06b2507615?sid=2af1d80f-46a0-435b-bcad-1313c83ee68b
+
+
+
+
+
+
 Video Demo 2: https://www.loom.com/share/16681b9ed4c9493498d0acaea7d1ce62?sid=5aba94a0-b979-4735-8ede-8243200cb976
+
+
+
+
+
+
+
+
+
+
 Presentation: https://docs.google.com/presentation/d/1z3qq5cPw4zgmwbnOJ2laQCPRBrN96RMExO6KYViZ_LM/edit?usp=sharing
+
+
+
 Demo/Website: https://coin-two.vercel.app/
 
 ---
